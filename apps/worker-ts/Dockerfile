@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM rust:1.84-bookworm AS rust-build
+FROM rust:1.86-bookworm AS rust-build
 WORKDIR /src
 COPY Cargo.toml rust-toolchain.toml ./
 COPY crates/gwi-git ./crates/gwi-git

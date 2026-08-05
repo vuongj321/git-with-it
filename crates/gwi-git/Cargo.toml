@@ -3,6 +3,7 @@ name = "gwi-git"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version = "1.86"
 description = "Git With It — bare clone / fetch CLI (Phase 0 stub)"
 
 [[bin]]
@@ -10,6 +11,6 @@ name = "gwi-git"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "~4.5.23", features = ["derive"] }
 anyhow = "1.0"
 url = "2.5"
