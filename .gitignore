@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build
+dist/
+.next/
+.turbo/
+out/
+build/
+target/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.log
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Worker workspaces
+.tmp/
+workspaces/
+
+# Docker volumes (local)
+infra/data/
+
+# Misc
+*.pem
+.cache/
