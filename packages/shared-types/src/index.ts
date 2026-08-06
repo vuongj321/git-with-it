@@ -5,6 +5,9 @@ export const AnalysisRunStatus = z.enum([
   'cloning',
   'uploading',
   'ready',
+  'parsing',
+  'graph_writing',
+  'graph_ready',
   'failed',
 ]);
 export type AnalysisRunStatus = z.infer<typeof AnalysisRunStatus>;
@@ -17,7 +20,7 @@ export const RepositoryStatus = z.enum([
 ]);
 export type RepositoryStatus = z.infer<typeof RepositoryStatus>;
 
-export const JobType = z.enum(['clone']);
+export const JobType = z.enum(['clone', 'parse', 'graph_write']);
 export type JobType = z.infer<typeof JobType>;
 
 export const JobStatus = z.enum([
@@ -27,6 +30,17 @@ export const JobStatus = z.enum([
   'failed',
 ]);
 export type JobStatus = z.infer<typeof JobStatus>;
+
+export const EntityKind = z.enum([
+  'package',
+  'file',
+  'class',
+  'interface',
+  'function',
+  'method',
+  'variable',
+]);
+export type EntityKind = z.infer<typeof EntityKind>;
 
 export const MembershipRole = z.enum(['owner', 'admin', 'member']);
 export type MembershipRole = z.infer<typeof MembershipRole>;
@@ -60,6 +74,27 @@ export const CloneJobPayloadSchema = z.object({
   encryptedPat: z.string().optional(),
 });
 export type CloneJobPayload = z.infer<typeof CloneJobPayloadSchema>;
+
+export const ParseJobPayloadSchema = z.object({
+  jobId: z.string().uuid(),
+  runId: z.string().uuid(),
+  repoId: z.string().uuid(),
+  orgId: z.string().uuid(),
+  commitSha: z.string().min(7),
+  cloneUri: z.string().min(1),
+  analyzerVersion: z.string().min(1),
+});
+export type ParseJobPayload = z.infer<typeof ParseJobPayloadSchema>;
+
+export const GraphWriteJobPayloadSchema = z.object({
+  jobId: z.string().uuid(),
+  runId: z.string().uuid(),
+  repoId: z.string().uuid(),
+  orgId: z.string().uuid(),
+  commitSha: z.string().min(7),
+  analyzerVersion: z.string().min(1),
+});
+export type GraphWriteJobPayload = z.infer<typeof GraphWriteJobPayloadSchema>;
 
 export const HealthResponseSchema = z.object({
   status: z.literal('ok'),
@@ -95,6 +130,8 @@ export const AnalysisRunDtoSchema = z.object({
   id: z.string().uuid(),
   repoId: z.string().uuid(),
   status: AnalysisRunStatus,
+  analyzerVersion: z.string().nullable().optional(),
+  commitSha: z.string().nullable().optional(),
   triggeredBy: z.string().nullable(),
   error: z.string().nullable(),
   createdAt: z.string(),
@@ -102,6 +139,17 @@ export const AnalysisRunDtoSchema = z.object({
   finishedAt: z.string().nullable(),
 });
 export type AnalysisRunDto = z.infer<typeof AnalysisRunDtoSchema>;
+
+export const EntityDtoSchema = z.object({
+  id: z.string().uuid(),
+  repoId: z.string().uuid(),
+  kind: EntityKind,
+  fqn: z.string(),
+  name: z.string(),
+  language: z.string().nullable(),
+  status: z.string(),
+});
+export type EntityDto = z.infer<typeof EntityDtoSchema>;
 
 /** Reject obviously non-git HTTPS URLs early (unit-tested). */
 export function isLikelyGitRemoteUrl(url: string): boolean {
@@ -117,3 +165,11 @@ export function isLikelyGitRemoteUrl(url: string): boolean {
     return false;
   }
 }
+
+export {
+  ANALYZER_VERSION,
+  entityId,
+  GWI_ENTITY_NAMESPACE,
+  uuidv5,
+  type EntityKindForId,
+} from './entity-id';

@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgEnum,
+  index,
 } from 'drizzle-orm/pg-core';
 
 export const membershipRoleEnum = pgEnum('membership_role', [
@@ -29,16 +30,29 @@ export const runStatusEnum = pgEnum('run_status', [
   'cloning',
   'uploading',
   'ready',
+  'parsing',
+  'graph_writing',
+  'graph_ready',
   'failed',
 ]);
 
-export const jobTypeEnum = pgEnum('job_type', ['clone']);
+export const jobTypeEnum = pgEnum('job_type', ['clone', 'parse', 'graph_write']);
 
 export const jobStatusEnum = pgEnum('job_status', [
   'queued',
   'active',
   'completed',
   'failed',
+]);
+
+export const entityKindEnum = pgEnum('entity_kind', [
+  'package',
+  'file',
+  'class',
+  'interface',
+  'function',
+  'method',
+  'variable',
 ]);
 
 export const organizations = pgTable(
@@ -105,6 +119,9 @@ export const analysisRuns = pgTable('analysis_runs', {
     .notNull()
     .references(() => repositories.id, { onDelete: 'cascade' }),
   status: runStatusEnum('status').notNull().default('queued'),
+  /** Semantic version of parse/link/graph pipeline that produced artifacts. */
+  analyzerVersion: text('analyzer_version'),
+  commitSha: text('commit_sha'),
   triggeredBy: uuid('triggered_by').references(() => users.id, {
     onDelete: 'set null',
   }),
@@ -130,9 +147,68 @@ export const jobs = pgTable('jobs', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** Stable entity identity across commits (UUIDv5 from repo+kind+fqn). */
+export const entities = pgTable(
+  'entities',
+  {
+    id: uuid('id').primaryKey(),
+    repoId: uuid('repo_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    kind: entityKindEnum('kind').notNull(),
+    fqn: text('fqn').notNull(),
+    language: text('language'),
+    name: text('name').notNull(),
+    status: text('status').notNull().default('active'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    firstSeenSha: text('first_seen_sha'),
+    lastSeenSha: text('last_seen_sha'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('entities_repo_kind_fqn_uidx').on(t.repoId, t.kind, t.fqn),
+    index('entities_repo_fqn_idx').on(t.repoId, t.fqn),
+  ],
+);
+
+/** Per-commit appearance of an entity in a file. */
+export const entityAppearances = pgTable(
+  'entity_appearances',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    entityId: uuid('entity_id')
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    repoId: uuid('repo_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    commitSha: text('commit_sha').notNull(),
+    path: text('path').notNull(),
+    contentHash: text('content_hash'),
+    blobOid: text('blob_oid'),
+    loc: integer('loc'),
+    startLine: integer('start_line'),
+    endLine: integer('end_line'),
+    analyzerVersion: text('analyzer_version').notNull(),
+    meta: jsonb('meta').$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('entity_appearances_entity_sha_path_uidx').on(
+      t.entityId,
+      t.commitSha,
+      t.path,
+    ),
+    index('entity_appearances_repo_sha_idx').on(t.repoId, t.commitSha),
+  ],
+);
+
 export type Organization = typeof organizations.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
 export type Repository = typeof repositories.$inferSelect;
 export type AnalysisRun = typeof analysisRuns.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
+export type Entity = typeof entities.$inferSelect;
+export type EntityAppearance = typeof entityAppearances.$inferSelect;
