@@ -4,27 +4,14 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import type { CloneJobPayload } from '@gwi/shared-types';
+import { ANALYZER_VERSION } from '@gwi/shared-types';
 import * as tar from 'tar';
-import { decryptPat, serviceToken } from './crypto';
+import { apiJson, patchRun } from './api';
+import { decryptPat } from './crypto';
 import { env } from './env';
 import { gwiGit, runCommand } from './git';
 import { logger } from './logger';
 import { createS3, ensureBucket, uploadFile } from './s3';
-
-async function patchRun(runId: string, body: Record<string, unknown>) {
-  const res = await fetch(`${env.API_URL}/v1/internal/runs/${runId}`, {
-    method: 'PATCH',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${serviceToken()}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to patch run ${runId}: ${res.status} ${text}`);
-  }
-}
 
 async function dirSizeBytes(root: string): Promise<number> {
   let total = 0;
@@ -132,9 +119,20 @@ export async function processCloneJob(payload: CloneJobPayload) {
       progress: 100,
       cloneUri,
       lastSyncedSha: sha,
+      commitSha: sha,
+      analyzerVersion: ANALYZER_VERSION,
       error: null,
     });
-    log.info({ cloneUri, sha }, 'clone ready');
+    log.info({ cloneUri, sha }, 'clone ready; enqueue parse');
+
+    await apiJson(`/v1/internal/runs/${payload.runId}/enqueue-parse`, {
+      method: 'POST',
+      body: {
+        commitSha: sha,
+        cloneUri,
+        analyzerVersion: ANALYZER_VERSION,
+      },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ err: message }, 'clone failed');

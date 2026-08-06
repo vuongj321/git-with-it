@@ -1,34 +1,61 @@
 import { Worker } from 'bullmq';
-import { CloneJobPayloadSchema } from '@gwi/shared-types';
+import {
+  CloneJobPayloadSchema,
+  GraphWriteJobPayloadSchema,
+  ParseJobPayloadSchema,
+} from '@gwi/shared-types';
 import { processCloneJob } from './clone';
 import { env } from './env';
+import { processGraphWriteJob } from './graph-write';
 import { logger } from './logger';
+import { processParseJob } from './parse';
 
-const QUEUE = 'clone';
+const connection = { url: env.REDIS_URL };
 
-const worker = new Worker(
-  QUEUE,
+const cloneWorker = new Worker(
+  'clone',
   async (job) => {
     const payload = CloneJobPayloadSchema.parse(job.data);
     await processCloneJob(payload);
   },
-  {
-    connection: { url: env.REDIS_URL },
-    concurrency: 2,
-  },
+  { connection, concurrency: 2 },
 );
 
-worker.on('ready', () => logger.info({ queue: QUEUE }, 'worker ready'));
-worker.on('completed', (job) =>
-  logger.info({ job_id: job.id }, 'job completed'),
+const parseWorker = new Worker(
+  'parse',
+  async (job) => {
+    const payload = ParseJobPayloadSchema.parse(job.data);
+    await processParseJob(payload);
+  },
+  { connection, concurrency: 1 },
 );
-worker.on('failed', (job, err) =>
-  logger.error({ job_id: job?.id, err: err.message }, 'job failed'),
+
+const graphWorker = new Worker(
+  'graph_write',
+  async (job) => {
+    const payload = GraphWriteJobPayloadSchema.parse(job.data);
+    await processGraphWriteJob(payload);
+  },
+  { connection, concurrency: 1 },
 );
+
+for (const [name, worker] of [
+  ['clone', cloneWorker],
+  ['parse', parseWorker],
+  ['graph_write', graphWorker],
+] as const) {
+  worker.on('ready', () => logger.info({ queue: name }, 'worker ready'));
+  worker.on('completed', (job) =>
+    logger.info({ queue: name, job_id: job.id }, 'job completed'),
+  );
+  worker.on('failed', (job, err) =>
+    logger.error({ queue: name, job_id: job?.id, err: err.message }, 'job failed'),
+  );
+}
 
 async function shutdown() {
   logger.info('shutting down worker');
-  await worker.close();
+  await Promise.all([cloneWorker.close(), parseWorker.close(), graphWorker.close()]);
   process.exit(0);
 }
 

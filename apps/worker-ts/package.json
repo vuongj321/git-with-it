@@ -15,6 +15,7 @@
     "@gwi/shared-types": "workspace:*",
     "bullmq": "^5.34.5",
     "ioredis": "^5.4.2",
+    "neo4j-driver": "^6.2.0",
     "pino": "^9.6.0",
     "tar": "^7.4.3",
     "zod": "^3.24.1"

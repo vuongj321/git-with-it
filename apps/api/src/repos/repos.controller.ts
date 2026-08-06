@@ -12,19 +12,30 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CreateRepoBodySchema, isLikelyGitRemoteUrl } from '@gwi/shared-types';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, ilike, or } from 'drizzle-orm';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { JwtOrSessionAuthGuard } from '../auth/jwt-or-session.guard';
 import { OrgMembershipGuard } from '../auth/org-membership.guard';
 import { OrgIdParam } from '../auth/org.decorator';
 import { db } from '../db/client';
-import { analysisRuns, jobs, repositories } from '../db/schema';
+import { analysisRuns, entities, jobs, repositories } from '../db/schema';
+import { queryGraphSlice } from '../graph/neo4j';
 import { JobsService } from '../jobs/jobs.service';
 
 const AnalyzeBody = z.object({
-  // optional override; defaults to repo.defaultBranch
   defaultBranch: z.string().min(1).optional(),
+});
+
+const GraphQuery = z.object({
+  sha: z.string().min(7).optional(),
+  view: z.enum(['package', 'file']).default('package'),
+  limit: z.coerce.number().int().min(1).max(500).default(500),
+});
+
+const EntitiesQuery = z.object({
+  q: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 @ApiTags('repos')
@@ -71,6 +82,73 @@ export class ReposController {
     return serializeRepo(repo);
   }
 
+  @Get(':id/graph')
+  async graph(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = GraphQuery.parse(query);
+    const sha = parsed.sha ?? repo.lastSyncedSha;
+    if (!sha) {
+      throw new BadRequestException('sha required (repo has no lastSyncedSha)');
+    }
+    try {
+      return await queryGraphSlice({
+        repoId: repo.id,
+        sha,
+        view: parsed.view,
+        maxNodes: parsed.limit,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new BadRequestException(`graph query failed: ${message}`);
+    }
+  }
+
+  @Get(':id/entities')
+  async searchEntities(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = EntitiesQuery.parse(query);
+    const limit = parsed.limit;
+    const rows = parsed.q
+      ? await db
+          .select()
+          .from(entities)
+          .where(
+            and(
+              eq(entities.repoId, repo.id),
+              or(
+                ilike(entities.fqn, `%${parsed.q}%`),
+                ilike(entities.name, `%${parsed.q}%`),
+              ),
+            ),
+          )
+          .orderBy(entities.fqn)
+          .limit(limit)
+      : await db
+          .select()
+          .from(entities)
+          .where(eq(entities.repoId, repo.id))
+          .orderBy(entities.fqn)
+          .limit(limit);
+
+    return rows.map((e) => ({
+      id: e.id,
+      repoId: e.repoId,
+      kind: e.kind,
+      fqn: e.fqn,
+      name: e.name,
+      language: e.language,
+      status: e.status,
+    }));
+  }
+
   @Post(':id/analyze')
   async analyze(
     @Param('id') id: string,
@@ -87,9 +165,10 @@ export class ReposController {
       .values({
         repoId: repo.id,
         status: 'queued',
-        triggeredBy: req.user!.userId === '00000000-0000-0000-0000-000000000000'
-          ? null
-          : req.user!.userId,
+        triggeredBy:
+          req.user!.userId === '00000000-0000-0000-0000-000000000000'
+            ? null
+            : req.user!.userId,
       })
       .returning();
 
@@ -178,6 +257,8 @@ function serializeRun(run: typeof analysisRuns.$inferSelect) {
     id: run.id,
     repoId: run.repoId,
     status: run.status,
+    analyzerVersion: run.analyzerVersion ?? null,
+    commitSha: run.commitSha ?? null,
     triggeredBy: run.triggeredBy,
     error: run.error,
     createdAt: run.createdAt.toISOString(),

@@ -69,6 +69,31 @@ async function runGitFallback(args: string[]) {
     if (!path) throw new Error('fetch requires --path');
     return runCommand('git', ['-C', path, 'fetch', '--all', '--prune']);
   }
+  if (args[0] === 'blob-oid') {
+    const path = flagValue(args, '--path');
+    const sha = flagValue(args, '--sha');
+    const file = flagValue(args, '--file');
+    if (!path || !sha || !file) throw new Error('blob-oid requires --path --sha --file');
+    return runCommand('git', ['-C', path, 'rev-parse', `${sha}:${file}`]);
+  }
+  if (args[0] === 'ls-tree') {
+    const path = flagValue(args, '--path');
+    const sha = flagValue(args, '--sha');
+    if (!path || !sha) throw new Error('ls-tree requires --path --sha');
+    return runCommand('git', ['-C', path, 'ls-tree', '-r', '--name-only', sha]);
+  }
+  if (args[0] === 'cat-file') {
+    const path = flagValue(args, '--path');
+    const oid = flagValue(args, '--oid');
+    if (!path || !oid) throw new Error('cat-file requires --path --oid');
+    return runCommand('git', ['-C', path, 'cat-file', '-p', oid]);
+  }
+  if (args[0] === 'rev-parse') {
+    const path = flagValue(args, '--path');
+    const rev = flagValue(args, '--rev') ?? 'HEAD';
+    if (!path) throw new Error('rev-parse requires --path');
+    return runCommand('git', ['-C', path, 'rev-parse', rev]);
+  }
   throw new Error(`Unsupported gwi-git args: ${args.join(' ')}`);
 }
 
