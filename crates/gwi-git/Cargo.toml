@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version = "1.86"
-description = "Git With It — bare clone / fetch CLI (Phase 0 stub)"
+description = "Git With It — bare clone / fetch / blob CLI"
 
 [[bin]]
 name = "gwi-git"

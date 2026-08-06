@@ -15,8 +15,8 @@ make up
 | Postgres 16 | `5432` | `gwi` / `gwi`, db `gwi` — system of record |
 | Redis 7 | `6379` | BullMQ clone queue + session stub |
 | MinIO | `9000` (S3), `9001` (console) | `gwiadmin` / `gwiadmin123`, bucket `gwi-artifacts` |
-| Neo4j 5 | `7474` (HTTP), `7687` (Bolt) | `neo4j` / `gwi-local-dev` — **provision only**, no writes in Phase 0 |
-| ClickHouse | `8123` (HTTP), `9009` (native) | **provision only**, no writes in Phase 0 |
+| Neo4j 5 | `7474` (HTTP), `7687` (Bolt) | `neo4j` / `gwi-local-dev` — Phase 1 sha-tagged graph snapshots
+| ClickHouse | `8123` (HTTP), `9009` (native) | **provision only**, no writes until Phase 3 |
 
 App processes (not in Compose by default):
 
@@ -36,14 +36,18 @@ pnpm db:seed
 
 Seed creates org `demo`, admin `admin@git-with-it.local` / `admin1234`.
 
-## gwi-git
+## gwi-git / gwi-parse
 
 ```bash
-cargo build -p gwi-git --release
+cargo build -p gwi-git -p gwi-parse --release
 export GWI_GIT_BIN="$PWD/target/release/gwi-git"   # Windows: target\release\gwi-git.exe
+# Optional: parse fixtures locally
+# cargo run -p gwi-parse -- dir --root testdata/repos/ts-mini
 ```
 
-The worker shells out to this binary for bare clone / fetch. It never executes repository code.
+The worker shells out to `gwi-git` for bare clone / fetch. Phase 1 adds `gwi-parse` for tree-sitter extraction. Analysis never executes repository code.
+
+Golden fixtures: `testdata/repos/{ts,py}-mini` with expected summaries under `testdata/goldens/`. Refresh with `GWI_UPDATE_GOLDENS=1 cargo test -p gwi-parse`.
 
 ## Windows / OneDrive
 

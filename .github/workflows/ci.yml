@@ -43,8 +43,11 @@ jobs:
       - name: Build packages & apps
         run: pnpm build
 
-      - name: Build gwi-git
-        run: cargo build -p gwi-git --release
+      - name: Build Rust crates
+        run: cargo build --workspace --release
+
+      - name: Test Rust crates (incl. golden fixtures)
+        run: cargo test --workspace
 
   docker-images:
     runs-on: ubuntu-latest

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/gwi-git"]
+members = ["crates/gwi-git", "crates/gwi-graph", "crates/gwi-link", "crates/gwi-parse"]
 
 [workspace.package]
 edition = "2021"

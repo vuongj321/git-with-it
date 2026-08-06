@@ -1,11 +1,12 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use url::Url;
 
 #[derive(Parser, Debug)]
-#[command(name = "gwi-git", about = "Git With It bare clone / fetch helper")]
+#[command(name = "gwi-git", about = "Git With It bare clone / fetch / blob helper")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -35,6 +36,40 @@ enum Commands {
         #[arg(long)]
         token: Option<String>,
     },
+    /// Resolve HEAD (or a ref) to a commit SHA
+    RevParse {
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long, default_value = "HEAD")]
+        rev: String,
+    },
+    /// List blob paths at a commit (name-only, recursive)
+    LsTree {
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long)]
+        sha: String,
+        /// Optional path prefix filter (e.g. src/)
+        #[arg(long)]
+        prefix: Option<String>,
+    },
+    /// Print blob contents for an OID (or `sha:path`) to stdout
+    CatFile {
+        #[arg(long)]
+        path: PathBuf,
+        /// Object id or `commit:path` tree-ish
+        #[arg(long)]
+        oid: String,
+    },
+    /// Resolve a path at a commit to a blob OID
+    BlobOid {
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long)]
+        sha: String,
+        #[arg(long)]
+        file: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -47,6 +82,18 @@ fn main() -> Result<()> {
             token,
         } => cmd_clone(url, path, branch, token),
         Commands::Fetch { path, token } => cmd_fetch(path, token),
+        Commands::RevParse { path, rev } => {
+            let sha = git_output(&path, &["rev-parse", &rev])?;
+            print!("{}", sha.trim());
+            Ok(())
+        }
+        Commands::LsTree { path, sha, prefix } => cmd_ls_tree(path, sha, prefix),
+        Commands::CatFile { path, oid } => cmd_cat_file(path, oid),
+        Commands::BlobOid { path, sha, file } => {
+            let oid = git_output(&path, &["rev-parse", &format!("{sha}:{file}")])?;
+            print!("{}", oid.trim());
+            Ok(())
+        }
     }
 }
 
@@ -125,6 +172,41 @@ fn cmd_fetch(path: PathBuf, token: Option<String>) -> Result<()> {
         "--prune".to_string(),
     ])?;
 
+    Ok(())
+}
+
+fn cmd_ls_tree(path: PathBuf, sha: String, prefix: Option<String>) -> Result<()> {
+    let mut args = vec!["ls-tree", "-r", "--name-only", &sha];
+    let prefix_owned;
+    if let Some(p) = prefix {
+        prefix_owned = p;
+        args.push(&prefix_owned);
+    }
+    let out = git_output(&path, &args)?;
+    print!("{out}");
+    Ok(())
+}
+
+fn cmd_cat_file(path: PathBuf, oid: String) -> Result<()> {
+    // Stream blob bytes to stdout (may be binary)
+    let status = Command::new("git")
+        .args(["-C", &path.display().to_string(), "cat-file", "-p", &oid])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("spawn git cat-file")?
+        .wait_with_output()
+        .context("wait git cat-file")?;
+    if !status.status.success() {
+        bail!(
+            "git cat-file failed: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+    }
+    io::stdout()
+        .write_all(&status.stdout)
+        .context("write stdout")?;
     Ok(())
 }
 

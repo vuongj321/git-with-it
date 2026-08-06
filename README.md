@@ -1,6 +1,6 @@
 # Git With It
 
-AI-powered software evolution platform. Phase 0 foundations: monorepo, Compose data plane, NestJS API, Auth.js, bare-clone worker, minimal Next.js shell.
+AI-powered software evolution platform. Phase 0 foundations plus Phase 1 parse/identity work-in-progress: tree-sitter extractors (`gwi-parse`), entity registry, and single-SHA Neo4j graphs.
 
 ## Prerequisites
 
@@ -38,8 +38,12 @@ See [docs/architecture/local-dev.md](docs/architecture/local-dev.md) for ports a
 ```
 apps/web          Next.js shell
 apps/api          NestJS control plane + Drizzle
-apps/worker-ts    BullMQ clone worker
-crates/gwi-git    Bare clone / fetch CLI
+apps/worker-ts    BullMQ clone / parse / graph_write worker
+crates/gwi-git    Bare clone / fetch / blob CLI
+crates/gwi-parse  tree-sitter TS/JS + Python extractors
+crates/gwi-link   Import → FQN resolution
+crates/gwi-graph  Package/file graph builder
+testdata/         Mini repos + golden parse fixtures
 packages/*        shared-types, tsconfig, eslint-config
 infra/            docker-compose + terraform stub
 docs/adr/         Architecture Decision Records
