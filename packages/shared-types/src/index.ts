@@ -11,6 +11,7 @@ export const AnalysisRunStatus = z.enum([
   'graph_ready',
   'metrics_writing',
   'evolving',
+  'ai_generating',
   'evolution_ready',
   'failed',
 ]);
@@ -34,6 +35,7 @@ export const JobType = z.enum([
   'checkpoint',
   'metrics_write',
   'evolve',
+  'ai',
 ]);
 export type JobType = z.infer<typeof JobType>;
 
@@ -70,6 +72,25 @@ export type EvolutionEventType = z.infer<typeof EvolutionEventType>;
 
 export const EvolutionSeverity = z.enum(['info', 'low', 'medium', 'high']);
 export type EvolutionSeverity = z.infer<typeof EvolutionSeverity>;
+
+export const InsightSeverity = z.enum(['low', 'medium', 'high', 'critical']);
+export type InsightSeverity = z.infer<typeof InsightSeverity>;
+
+export const InsightCategory = z.enum([
+  'debt',
+  'drift',
+  'risk',
+  'refactor',
+  'hotspot',
+]);
+export type InsightCategory = z.infer<typeof InsightCategory>;
+
+export const InsightStatus = z.enum([
+  'published',
+  'failed_validation',
+  'skipped_no_provider',
+]);
+export type InsightStatus = z.infer<typeof InsightStatus>;
 
 export const MembershipRole = z.enum(['owner', 'admin', 'member']);
 export type MembershipRole = z.infer<typeof MembershipRole>;
@@ -187,6 +208,16 @@ export const EvolveJobPayloadSchema = z.object({
 });
 export type EvolveJobPayload = z.infer<typeof EvolveJobPayloadSchema>;
 
+export const AiGenerateJobPayloadSchema = z.object({
+  jobId: z.string().uuid(),
+  runId: z.string().uuid(),
+  repoId: z.string().uuid(),
+  orgId: z.string().uuid(),
+  sampleShas: z.array(z.string().min(7)).min(1),
+  sampleConfig: SampleConfigSchema.partial().optional(),
+});
+export type AiGenerateJobPayload = z.infer<typeof AiGenerateJobPayloadSchema>;
+
 export const HealthResponseSchema = z.object({
   status: z.literal('ok'),
   service: z.string(),
@@ -301,6 +332,125 @@ export const GraphDiffSchema = z.object({
   highlightIds: z.array(z.string()),
 });
 export type GraphDiff = z.infer<typeof GraphDiffSchema>;
+
+export const InsightSignalSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['event', 'metric_delta', 'absolute_hotspot', 'graph_diff']),
+  metric: z.string().nullable().optional(),
+  entityId: z.string().uuid().nullable().optional(),
+  label: z.string(),
+  fromValue: z.number().nullable().optional(),
+  toValue: z.number().nullable().optional(),
+  delta: z.number().nullable().optional(),
+  severity: z.string().nullable().optional(),
+  fromSha: z.string().nullable().optional(),
+  toSha: z.string().nullable().optional(),
+});
+export type InsightSignal = z.infer<typeof InsightSignalSchema>;
+
+export const InsightCandidateSchema = z.object({
+  id: z.string(),
+  type: z.enum(['evolution_event', 'metric_delta', 'hotspot', 'god_object']),
+  title: z.string(),
+  entityIds: z.array(z.string().uuid()).min(1),
+  fromSha: z.string().min(7),
+  toSha: z.string().min(7),
+  score: z.number(),
+  signalRefs: z.array(z.string()).min(1),
+});
+export type InsightCandidate = z.infer<typeof InsightCandidateSchema>;
+
+export const EvidenceEntitySchema = z.object({
+  id: z.string().uuid(),
+  fqn: z.string(),
+  kind: z.string(),
+  name: z.string(),
+});
+export type EvidenceEntity = z.infer<typeof EvidenceEntitySchema>;
+
+export const EvidenceMetricPointSchema = z.object({
+  commitSha: z.string().min(7),
+  topoIndex: z.number().int(),
+  value: z.number(),
+});
+export type EvidenceMetricPoint = z.infer<typeof EvidenceMetricPointSchema>;
+
+export const EvidenceMetricSeriesSchema = z.object({
+  entityId: z.string().uuid(),
+  metric: z.string(),
+  points: z.array(EvidenceMetricPointSchema),
+});
+export type EvidenceMetricSeries = z.infer<typeof EvidenceMetricSeriesSchema>;
+
+export const EvidenceBundleSchema = z.object({
+  version: z.literal('evidence_v1'),
+  candidate: InsightCandidateSchema,
+  entities: z.array(EvidenceEntitySchema),
+  signals: z.array(InsightSignalSchema),
+  metrics: z.array(EvidenceMetricSeriesSchema),
+  relatedEvents: z.array(
+    z.object({
+      id: z.string(),
+      type: z.string(),
+      severity: z.string(),
+      title: z.string(),
+      entityIds: z.array(z.string().uuid()).default([]),
+      fromSha: z.string().min(7),
+      toSha: z.string().min(7),
+    }),
+  ),
+  diffSummary: z.object({
+    nodesAdded: z.number().int(),
+    nodesRemoved: z.number().int(),
+    edgesAdded: z.number().int(),
+    edgesRemoved: z.number().int(),
+    highlightIds: z.array(z.string()),
+  }),
+  allowedClaims: z.array(z.string()),
+  meta: z.object({
+    repoId: z.string().uuid(),
+    runId: z.string().uuid(),
+    analyzerVersion: z.string().nullable().optional(),
+    generatedAt: z.string(),
+  }),
+});
+export type EvidenceBundle = z.infer<typeof EvidenceBundleSchema>;
+
+export const InsightOutputSchema = z.object({
+  headline: z.string().min(1).max(200),
+  narrative: z.string().min(1).max(4000),
+  severity: InsightSeverity,
+  category: InsightCategory,
+  entityIds: z.array(z.string().uuid()),
+  confidence: z.number().min(0).max(1),
+  suggestedActions: z.array(z.string().min(1)).max(5),
+  citedSignals: z.array(z.string().min(1)).min(1),
+});
+export type InsightOutput = z.infer<typeof InsightOutputSchema>;
+
+export const InsightDtoSchema = z.object({
+  id: z.string().uuid(),
+  repoId: z.string().uuid(),
+  runId: z.string().uuid().nullable(),
+  headline: z.string(),
+  narrative: z.string(),
+  severity: InsightSeverity,
+  category: InsightCategory,
+  entityIds: z.array(z.string().uuid()),
+  fromSha: z.string(),
+  toSha: z.string(),
+  evidenceHash: z.string(),
+  model: z.string().nullable(),
+  provider: z.string().nullable(),
+  promptHash: z.string().nullable(),
+  confidence: z.number(),
+  status: InsightStatus,
+  suggestedActions: z.array(z.string()),
+  citedSignals: z.array(z.string()),
+  candidateType: z.string().nullable().optional(),
+  createdAt: z.string(),
+});
+export type InsightDto = z.infer<typeof InsightDtoSchema>;
 
 /** Reject obviously non-git HTTPS URLs early (unit-tested). */
 export function isLikelyGitRemoteUrl(url: string): boolean {
