@@ -4,6 +4,7 @@ import {
   SampleConfigSchema,
   diffGraphs,
   eventsFromDiff,
+  graphSnapshotCandidates,
   type GraphSnapshot,
 } from '@gwi/shared-types';
 import { apiJson, chunkArray, patchRun } from './api';
@@ -12,13 +13,11 @@ import { createS3, downloadBuffer, ensureBucket } from './s3';
 
 async function loadSnapshot(
   s3: ReturnType<typeof createS3>,
+  orgId: string,
   repoId: string,
   sha: string,
 ): Promise<GraphSnapshot> {
-  const keys = [
-    `graphs/${repoId}/snapshots/${sha}.json`,
-    `repos/${repoId}/graphs/${sha}.json`,
-  ];
+  const keys = graphSnapshotCandidates(orgId, repoId, sha);
   let lastErr: unknown;
   for (const key of keys) {
     try {
@@ -55,8 +54,8 @@ export async function processEvolveJob(payload: EvolveJobPayload) {
     for (let i = 1; i < shas.length; i++) {
       const fromSha = shas[i - 1]!;
       const toSha = shas[i]!;
-      const from = await loadSnapshot(s3, payload.repoId, fromSha);
-      const to = await loadSnapshot(s3, payload.repoId, toSha);
+      const from = await loadSnapshot(s3, payload.orgId, payload.repoId, fromSha);
+      const to = await loadSnapshot(s3, payload.orgId, payload.repoId, toSha);
       const diff = diffGraphs(from, to, {
         couplingDeltaThreshold: config.couplingDeltaThreshold,
       });

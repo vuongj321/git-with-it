@@ -1,19 +1,16 @@
 import type { MetricsWriteJobPayload } from '@gwi/shared-types';
-import { SampleConfigSchema } from '@gwi/shared-types';
+import { SampleConfigSchema, graphSnapshotCandidates } from '@gwi/shared-types';
 import { apiJson, patchRun } from './api';
 import { logger } from './logger';
 import { createS3, objectExists } from './s3';
 
 async function resolveSnapshotUri(
   s3: ReturnType<typeof createS3>,
+  orgId: string,
   repoId: string,
   sha: string,
 ): Promise<string | null> {
-  const keys = [
-    `repos/${repoId}/graphs/${sha}.json`,
-    `graphs/${repoId}/snapshots/${sha}.json`,
-  ];
-  for (const key of keys) {
+  for (const key of graphSnapshotCandidates(orgId, repoId, sha)) {
     if (await objectExists(s3, key)) return key;
   }
   return null;
@@ -39,7 +36,12 @@ export async function processMetricsWriteJob(payload: MetricsWriteJobPayload) {
 
     for (let i = 0; i < sampleShas.length; i++) {
       const sha = sampleShas[i]!;
-      const artifactUri = await resolveSnapshotUri(s3, payload.repoId, sha);
+      const artifactUri = await resolveSnapshotUri(
+        s3,
+        payload.orgId,
+        payload.repoId,
+        sha,
+      );
       if (!artifactUri) {
         log.warn({ sha }, 'snapshot missing; skipping metrics');
         continue;

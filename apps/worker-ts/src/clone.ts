@@ -12,6 +12,8 @@ import { env } from './env';
 import { gwiGit, runCommand } from './git';
 import { logger } from './logger';
 import { createS3, ensureBucket, uploadFile } from './s3';
+import { scanSecrets } from './secret-scan';
+import { bareArchiveKey } from '@gwi/shared-types';
 
 async function dirSizeBytes(root: string): Promise<number> {
   let total = 0;
@@ -90,6 +92,13 @@ export async function processCloneJob(payload: CloneJobPayload) {
       throw new Error(`Clone exceeds max size (${size} > ${env.MAX_CLONE_BYTES} bytes)`);
     }
 
+    const secretScan = await scanSecrets(bareDir);
+    if (secretScan.blocked) {
+      const rules =
+        secretScan.findings.map((f) => f.rule).join(', ') || 'findings';
+      throw new Error(`Secret scan blocked clone (${rules})`);
+    }
+
     const head = await runCommand('git', ['-C', bareDir, 'rev-parse', 'HEAD']);
     const sha = head.stdout.trim();
 
@@ -101,7 +110,7 @@ export async function processCloneJob(payload: CloneJobPayload) {
     log.info({ sha, size }, 'uploading bare archive');
 
     const packed = await packBareRepo(bareDir, workRoot);
-    const objectKey = `repos/${payload.repoId}/bare.${packed.keyExt}`;
+    const objectKey = bareArchiveKey(payload.orgId, payload.repoId, packed.keyExt);
 
     const s3 = createS3();
     await ensureBucket(s3);

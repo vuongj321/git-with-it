@@ -59,6 +59,8 @@ const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   AI_MODEL: z.string().default('mock-grounded-v1'),
+  SECRET_SCAN_MODE: z.enum(['off', 'warn', 'block']).default('warn'),
+  ORCHESTRATOR: z.enum(['bullmq', 'temporal']).default('bullmq'),
 });
 
 export const env = EnvSchema.parse({
@@ -88,4 +90,6 @@ export const env = EnvSchema.parse({
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   AI_MODEL: process.env.AI_MODEL,
+  SECRET_SCAN_MODE: process.env.SECRET_SCAN_MODE,
+  ORCHESTRATOR: process.env.ORCHESTRATOR,
 });

@@ -1,4 +1,5 @@
 import type { GraphWriteJobPayload } from '@gwi/shared-types';
+import { graphSnapshotKey } from '@gwi/shared-types';
 import { apiJson, patchRun } from './api';
 import { logger } from './logger';
 import { createS3, ensureBucket, objectExists } from './s3';
@@ -19,7 +20,11 @@ export async function processGraphWriteJob(payload: GraphWriteJobPayload) {
 
     const s3 = createS3();
     await ensureBucket(s3);
-    const artifactUri = `repos/${payload.repoId}/graphs/${payload.commitSha}.json`;
+    const artifactUri = graphSnapshotKey(
+      payload.orgId,
+      payload.repoId,
+      payload.commitSha,
+    );
     if (!(await objectExists(s3, artifactUri))) {
       throw new Error(`graph snapshot missing at ${artifactUri}`);
     }

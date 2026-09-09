@@ -2,6 +2,8 @@ import { rm } from 'node:fs/promises';
 import type { EnumerateSampleJobPayload } from '@gwi/shared-types';
 import {
   SampleConfigSchema,
+  applySampleDensityBackoff,
+  estimateParseMinutes,
   sampleFirstParentCommits,
   type WalkedCommit,
 } from '@gwi/shared-types';
@@ -70,10 +72,29 @@ export async function processEnumerateSampleJob(
       throw new Error('No commits found on first-parent walk');
     }
 
-    const samples = sampleFirstParentCommits(walked, {
-      lastN: config.lastN,
-      monthlyAnchors: config.monthlyAnchors,
+    const estimated = estimateParseMinutes(
+      Math.min(config.lastN, walked.length),
+      config.secondsPerCommit,
+    );
+    const backoff = applySampleDensityBackoff({
+      estimatedMinutes: estimated,
+      slaMinutes: config.slaMinutes,
+      policy: { lastN: config.lastN, monthlyAnchors: config.monthlyAnchors },
     });
+    if (backoff.steps > 0) {
+      log.warn(
+        {
+          estimatedMinutes: estimated,
+          slaMinutes: config.slaMinutes,
+          fromLastN: config.lastN,
+          toLastN: backoff.policy.lastN,
+          reason: backoff.reason,
+        },
+        'sample density backoff applied',
+      );
+    }
+
+    const samples = sampleFirstParentCommits(walked, backoff.policy);
 
     log.info(
       { walked: walked.length, sampled: samples.length },

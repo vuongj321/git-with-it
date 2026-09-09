@@ -5,7 +5,11 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import type { ParseCommitJobPayload } from '@gwi/shared-types';
 import {
   SampleConfigSchema,
+  blobParseKey,
   diffGraphs,
+  graphCheckpointKey,
+  graphDeltaKey,
+  graphSnapshotKey,
   type GraphEdge,
   type GraphSnapshot,
 } from '@gwi/shared-types';
@@ -51,8 +55,8 @@ type DiffEntry = {
   score: number | null;
 };
 
-function cacheKey(oid: string, zstd: boolean) {
-  return zstd ? `blobs/${oid}.parse.json.zst` : `blobs/${oid}.parse.json.gz`;
+function cacheKey(orgId: string, oid: string, zstd: boolean) {
+  return blobParseKey(orgId, oid, zstd);
 }
 
 async function decompressZstd(buf: Buffer): Promise<string> {
@@ -71,10 +75,11 @@ async function decompressZstd(buf: Buffer): Promise<string> {
 
 async function loadParseCache(
   s3: ReturnType<typeof createS3>,
+  orgId: string,
   oid: string,
 ): Promise<FileParseResult | null> {
   for (const zstd of [true, false]) {
-    const key = cacheKey(oid, zstd);
+    const key = cacheKey(orgId, oid, zstd);
     if (!(await objectExists(s3, key))) continue;
     const buf = await downloadBuffer(s3, key);
     try {
@@ -91,6 +96,7 @@ async function loadParseCache(
 
 async function storeParseCache(
   s3: ReturnType<typeof createS3>,
+  orgId: string,
   oid: string,
   result: FileParseResult,
 ) {
@@ -102,12 +108,12 @@ async function storeParseCache(
     await writeFile(tmp, json);
     await runCommand('zstd', ['-f', '-q', '-o', out, tmp], { timeoutMs: 30_000 });
     const body = await readFile(out);
-    await uploadBuffer(s3, cacheKey(oid, true), body, 'application/zstd');
+    await uploadBuffer(s3, cacheKey(orgId, oid, true), body, 'application/zstd');
     await rm(tmp, { force: true });
     await rm(out, { force: true });
   } catch {
     const body = gzipSync(json);
-    await uploadBuffer(s3, cacheKey(oid, false), body, 'application/gzip');
+    await uploadBuffer(s3, cacheKey(orgId, oid, false), body, 'application/gzip');
   }
 }
 
@@ -130,7 +136,7 @@ async function compressJson(obj: unknown): Promise<{ body: Buffer; zstd: boolean
 }
 
 function SOURCE_EXT(p: string) {
-  return /\.(ts|tsx|js|jsx|mjs|cjs|py)$/i.test(p);
+  return /\.(ts|tsx|js|jsx|mjs|cjs|py|go|java)$/i.test(p);
 }
 
 /**
@@ -174,6 +180,7 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
       bareDir,
       workRoot,
       s3,
+      orgId: payload.orgId,
       repoId: payload.repoId,
       sha: tipSha,
       analyzerVersion: payload.analyzerVersion,
@@ -181,8 +188,8 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
       priorPaths: null,
     });
 
-    await uploadSnapshot(s3, payload.repoId, tipSha, tipGraph.snapshot);
-    const tipArtifactUri = `repos/${payload.repoId}/graphs/${tipSha}.json`;
+    await uploadSnapshot(s3, payload.orgId, payload.repoId, tipSha, tipGraph.snapshot);
+    const tipArtifactUri = graphSnapshotKey(payload.orgId, payload.repoId, tipSha);
     await apiJson(`/v1/internal/repos/${payload.repoId}/graph/temporal-snapshot`, {
       method: 'POST',
       body: {
@@ -217,6 +224,7 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
         bareDir,
         workRoot,
         s3,
+        orgId: payload.orgId,
         repoId: payload.repoId,
         sha,
         analyzerVersion: payload.analyzerVersion,
@@ -228,7 +236,7 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
       priorPaths = new Set(parsed.filePaths);
       reverseImports = parsed.reverseImports;
 
-      await uploadSnapshot(s3, payload.repoId, sha, parsed.snapshot);
+      await uploadSnapshot(s3, payload.orgId, payload.repoId, sha, parsed.snapshot);
 
       if (prevSnapshot && prevSha) {
         const renameMap = new Map<string, string>();
@@ -237,9 +245,12 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
         }
         const diff = diffGraphs(prevSnapshot, parsed.snapshot, { renameMap });
 
-        const deltaKey = `graphs/${payload.repoId}/deltas/${prevSha}_${sha}.json`;
+        const deltaKey = graphDeltaKey(payload.orgId, payload.repoId, prevSha, sha).replace(
+          /\.json\.gz$/,
+          '',
+        );
         const packed = await compressJson(diff);
-        const deltaUri = packed.zstd ? `${deltaKey}.zst` : `${deltaKey}.gz`;
+        const deltaUri = packed.zstd ? `${deltaKey}.json.zst` : `${deltaKey}.json.gz`;
         await uploadBuffer(
           s3,
           deltaUri,
@@ -256,7 +267,7 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
             fromTopo: i - 1,
             toTopo: i,
             artifactUri: deltaUri,
-            snapshotUri: `repos/${payload.repoId}/graphs/${sha}.json`,
+            snapshotUri: graphSnapshotKey(payload.orgId, payload.repoId, sha),
             analyzerVersion: payload.analyzerVersion,
             nodesAdded: diff.nodesAdded.length,
             nodesRemoved: diff.nodesRemoved.length,
@@ -272,9 +283,12 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
         });
 
         if (i > 0 && i % config.checkpointEvery === 0) {
-          const ckptKey = `graphs/${payload.repoId}/ckpt/${sha}`;
+          const ckptBase = graphCheckpointKey(payload.orgId, payload.repoId, sha).replace(
+            /\.json\.gz$/,
+            '',
+          );
           const ckpt = await compressJson(parsed.snapshot);
-          const ckptUri = ckpt.zstd ? `${ckptKey}.zst` : `${ckptKey}.gz`;
+          const ckptUri = ckpt.zstd ? `${ckptBase}.json.zst` : `${ckptBase}.json.gz`;
           await uploadBuffer(
             s3,
             ckptUri,
@@ -301,7 +315,7 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
             sha,
             topoIndex: i,
             analyzerVersion: payload.analyzerVersion,
-            artifactUri: `repos/${payload.repoId}/graphs/${sha}.json`,
+            artifactUri: graphSnapshotKey(payload.orgId, payload.repoId, sha),
           },
         });
       }
@@ -352,18 +366,19 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
 
 async function uploadSnapshot(
   s3: ReturnType<typeof createS3>,
+  orgId: string,
   repoId: string,
   sha: string,
   snapshot: GraphSnapshot,
 ) {
-  const key = `repos/${repoId}/graphs/${sha}.json`;
+  const key = graphSnapshotKey(orgId, repoId, sha);
   await uploadBuffer(
     s3,
     key,
     Buffer.from(JSON.stringify(snapshot), 'utf8'),
     'application/json',
   );
-  // Also under graphs/ path for checkpoints/materialize
+  // Legacy path for migration reads
   const alt = `graphs/${repoId}/snapshots/${sha}.json`;
   await uploadBuffer(
     s3,
@@ -377,6 +392,7 @@ async function parseAndBuildGraph(opts: {
   bareDir: string;
   workRoot: string;
   s3: ReturnType<typeof createS3>;
+  orgId: string;
   repoId: string;
   sha: string;
   analyzerVersion: string;
@@ -392,6 +408,19 @@ async function parseAndBuildGraph(opts: {
   const treeDir = path.join(opts.workRoot, `tree-${opts.sha.slice(0, 12)}`);
   await rm(treeDir, { recursive: true, force: true }).catch(() => undefined);
   await materializeWorktree(opts.bareDir, treeDir, opts.sha);
+
+  // Optional SCIP precision (never runs untrusted builds)
+  if (!opts.parentSha) {
+    const { maybeRunScip } = await import('./scip');
+    const scip = await maybeRunScip({
+      enabled: process.env.SCIP_ENABLED === 'true',
+      worktree: treeDir,
+      languages: ['typescript', 'javascript', 'go'],
+    });
+    if (scip.attempted) {
+      logger.info({ scip }, 'SCIP precision path considered');
+    }
+  }
 
   let changedPaths: Set<string> | null = null;
   const renames: Array<[string, string]> = [];
@@ -463,7 +492,7 @@ async function parseAndBuildGraph(opts: {
       !opts.parentSha;
 
     if (!mustParse && oid) {
-      const cached = await loadParseCache(opts.s3, oid);
+      const cached = await loadParseCache(opts.s3, opts.orgId, oid);
       if (cached && cached.analyzer_version === opts.analyzerVersion) {
         results.push(cached);
         continue;
@@ -472,7 +501,7 @@ async function parseAndBuildGraph(opts: {
 
     // Prefer cache even on mustParse when oid unchanged
     if (oid) {
-      const cached = await loadParseCache(opts.s3, oid);
+      const cached = await loadParseCache(opts.s3, opts.orgId, oid);
       if (cached && cached.analyzer_version === opts.analyzerVersion) {
         results.push(cached);
         continue;
@@ -480,7 +509,7 @@ async function parseAndBuildGraph(opts: {
     }
 
     results.push(parsed);
-    if (oid) await storeParseCache(opts.s3, oid, parsed);
+    if (oid) await storeParseCache(opts.s3, opts.orgId, oid, parsed);
   }
 
   // Entity upsert for this commit
