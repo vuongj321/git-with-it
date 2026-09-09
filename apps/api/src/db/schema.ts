@@ -113,12 +113,23 @@ export const insightStatusEnum = pgEnum('insight_status', [
   'skipped_no_provider',
 ]);
 
+export const planTierEnum = pgEnum('plan_tier', ['free', 'team', 'enterprise']);
+
+export const subscriptionStatusEnum = pgEnum('subscription_status', [
+  'active',
+  'past_due',
+  'canceled',
+  'trialing',
+]);
+
 export const organizations = pgTable(
   'organizations',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
+    /** Feature flags: scip_enabled, etc. */
+    features: jsonb('features').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -167,6 +178,9 @@ export const repositories = pgTable('repositories', {
   lastSyncedSha: text('last_synced_sha'),
   lastError: text('last_error'),
   encryptedPat: text('encrypted_pat'),
+  features: jsonb('features').$type<Record<string, unknown>>().notNull().default({}),
+  /** structural (tree-sitter) | scip */
+  precisionMode: text('precision_mode').notNull().default('structural'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -462,12 +476,113 @@ export const insights = pgTable(
     status: insightStatusEnum('status').notNull().default('published'),
     suggestedActions: jsonb('suggested_actions').$type<string[]>().default([]),
     citedSignals: jsonb('cited_signals').$type<string[]>().default([]),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+    snoozedUntil: timestamp('snoozed_until', { withTimezone: true }),
+    feedback: text('feedback'),
+    feedbackNote: text('feedback_note'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     uniqueIndex('insights_repo_run_hash_uidx').on(t.repoId, t.runId, t.evidenceHash),
     index('insights_repo_created_idx').on(t.repoId, t.createdAt),
     index('insights_repo_severity_idx').on(t.repoId, t.severity),
+  ],
+);
+
+export const plans = pgTable(
+  'plans',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tier: planTierEnum('tier').notNull(),
+    name: text('name').notNull(),
+    maxRepos: integer('max_repos').notNull().default(3),
+    maxParseMinutesMonth: integer('max_parse_minutes_month').notNull().default(60),
+    maxAiCallsMonth: integer('max_ai_calls_month').notNull().default(20),
+    stripePriceId: text('stripe_price_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('plans_tier_uidx').on(t.tier)],
+);
+
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => plans.id),
+    status: subscriptionStatusEnum('status').notNull().default('active'),
+    stripeCustomerId: text('stripe_customer_id'),
+    stripeSubscriptionId: text('stripe_subscription_id'),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    graceUntil: timestamp('grace_until', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('subscriptions_org_uidx').on(t.orgId)],
+);
+
+export const usageCounters = pgTable(
+  'usage_counters',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    periodYm: text('period_ym').notNull(),
+    repos: integer('repos').notNull().default(0),
+    parseMinutes: integer('parse_minutes').notNull().default(0),
+    aiCalls: integer('ai_calls').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('usage_counters_org_period_uidx').on(t.orgId, t.periodYm)],
+);
+
+export const githubAppInstalls = pgTable(
+  'github_app_installs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    installationId: bigint('installation_id', { mode: 'number' }).notNull(),
+    accountLogin: text('account_login'),
+    accountId: bigint('account_id', { mode: 'number' }),
+    permissions: jsonb('permissions').$type<Record<string, unknown>>().notNull().default({}),
+    suspended: boolean('suspended').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('github_app_installs_installation_uidx').on(t.installationId),
+    index('github_app_installs_org_idx').on(t.orgId),
+  ],
+);
+
+export const githubRepoLinks = pgTable(
+  'github_repo_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    repoId: uuid('repo_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    installId: uuid('install_id')
+      .notNull()
+      .references(() => githubAppInstalls.id, { onDelete: 'cascade' }),
+    githubRepoId: bigint('github_repo_id', { mode: 'number' }).notNull(),
+    fullName: text('full_name').notNull(),
+    defaultBranch: text('default_branch'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('github_repo_links_repo_uidx').on(t.repoId),
+    uniqueIndex('github_repo_links_gh_repo_uidx').on(t.githubRepoId),
   ],
 );
 
@@ -487,3 +602,8 @@ export type EvolutionEvent = typeof evolutionEvents.$inferSelect;
 export type InsightEvidence = typeof insightEvidence.$inferSelect;
 export type InsightCandidate = typeof insightCandidates.$inferSelect;
 export type Insight = typeof insights.$inferSelect;
+export type Plan = typeof plans.$inferSelect;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type UsageCounter = typeof usageCounters.$inferSelect;
+export type GithubAppInstall = typeof githubAppInstalls.$inferSelect;
+export type GithubRepoLink = typeof githubRepoLinks.$inferSelect;

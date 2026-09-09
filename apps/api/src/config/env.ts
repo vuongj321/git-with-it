@@ -60,6 +60,13 @@ const EnvSchema = z.object({
     .transform((v) => v !== 'false'),
   /** Nest JSON body limit (worker internal posts can exceed the Express default ~100kb). */
   BODY_JSON_LIMIT: z.string().default('10mb'),
+  ORCHESTRATOR: z.enum(['bullmq', 'temporal']).default('bullmq'),
+  TEMPORAL_ADDRESS: z.string().optional().default(''),
+  TEMPORAL_NAMESPACE: z.string().default('default'),
+  TEMPORAL_TASK_QUEUE: z.string().default('gwi-analysis'),
+  STRIPE_SECRET_KEY: z.string().optional().default(''),
+  STRIPE_TEAM_PRICE_ID: z.string().optional().default(''),
+  GITHUB_WEBHOOK_SECRET: z.string().optional().default(''),
 });
 
 function loadEnv() {
@@ -89,6 +96,13 @@ function loadEnv() {
     S3_REGION: process.env.S3_REGION,
     S3_FORCE_PATH_STYLE: process.env.S3_FORCE_PATH_STYLE,
     BODY_JSON_LIMIT: process.env.BODY_JSON_LIMIT,
+    ORCHESTRATOR: process.env.ORCHESTRATOR,
+    TEMPORAL_ADDRESS: process.env.TEMPORAL_ADDRESS ?? '',
+    TEMPORAL_NAMESPACE: process.env.TEMPORAL_NAMESPACE,
+    TEMPORAL_TASK_QUEUE: process.env.TEMPORAL_TASK_QUEUE,
+    STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY ?? '',
+    STRIPE_TEAM_PRICE_ID: process.env.STRIPE_TEAM_PRICE_ID ?? '',
+    GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET ?? '',
   });
   if (!parsed.success) {
     console.error(parsed.error.flatten());

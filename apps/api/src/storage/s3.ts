@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import type { GraphDiff, GraphSnapshot } from '@gwi/shared-types';
+import { graphSnapshotCandidates, graphSnapshotKey } from '@gwi/shared-types';
 import { env } from '../config/env';
 
 let client: S3Client | null = null;
@@ -33,7 +34,8 @@ export function keyFromArtifactUri(uri: string): string {
   return uri.replace(/^\//, '');
 }
 
-export function snapshotKey(repoId: string, sha: string): string {
+export function snapshotKey(repoId: string, sha: string, orgId?: string): string {
+  if (orgId) return graphSnapshotKey(orgId, repoId, sha);
   return `repos/${repoId}/graphs/${sha}.json`;
 }
 
@@ -87,10 +89,13 @@ export async function loadGraphSnapshot(
   repoId: string,
   sha: string,
   artifactUri?: string | null,
+  orgId?: string,
 ): Promise<GraphSnapshot> {
   const candidates = artifactUri?.trim()
     ? [keyFromArtifactUri(artifactUri)]
-    : [snapshotKey(repoId, sha), `graphs/${repoId}/snapshots/${sha}.json`];
+    : orgId
+      ? graphSnapshotCandidates(orgId, repoId, sha)
+      : [snapshotKey(repoId, sha), `graphs/${repoId}/snapshots/${sha}.json`];
 
   let lastErr: unknown;
   for (const key of candidates) {

@@ -49,6 +49,11 @@ import {
 } from '../cache/redis-cache';
 import { queryGraphSlice } from '../graph/neo4j';
 import { JobsService } from '../jobs/jobs.service';
+import { QuotasService } from '../billing/quotas.service';
+import {
+  orchestratorMode,
+  startAnalysisWorkflow,
+} from '../temporal/client';
 import {
   queryCycleMembers,
   queryHeatmap,
@@ -155,7 +160,10 @@ const InsightsQuery = z.object({
 @Controller('v1/repos')
 @UseGuards(JwtOrSessionAuthGuard, OrgMembershipGuard)
 export class ReposController {
-  constructor(private readonly jobsService: JobsService) {}
+  constructor(
+    private readonly jobsService: JobsService,
+    private readonly quotas: QuotasService,
+  ) {}
 
   @Post()
   async create(@Body() body: unknown, @Req() _req: Request) {
@@ -163,6 +171,8 @@ export class ReposController {
     if (!isLikelyGitRemoteUrl(parsed.remoteUrl)) {
       throw new BadRequestException('remoteUrl must be an http(s) git remote');
     }
+    await this.quotas.ensureFreeSubscription(parsed.orgId);
+    await this.quotas.assertCanAddRepo(parsed.orgId);
     const [repo] = await db
       .insert(repositories)
       .values({
@@ -598,12 +608,18 @@ export class ReposController {
       .where(and(...conditions))
       .orderBy(desc(insights.createdAt))
       .limit(entityFilter ? parsed.limit * 3 : parsed.limit);
+    const now = Date.now();
+    rows = rows.filter(
+      (row) =>
+        !row.dismissedAt &&
+        (!row.snoozedUntil || row.snoozedUntil.getTime() <= now),
+    );
     if (entityFilter) {
       rows = rows
         .filter((row) => (row.entityIds ?? []).includes(entityFilter))
         .slice(0, parsed.limit);
     }
-    return rows.map(serializeInsight);
+    return rows.slice(0, parsed.limit).map(serializeInsight);
   }
 
   @Get(':id/insights/:insightId')
@@ -620,6 +636,47 @@ export class ReposController {
       .limit(1);
     if (!row) throw new NotFoundException('Insight not found');
     return serializeInsight(row);
+  }
+
+  @Post(':id/insights/:insightId/dismiss')
+  async dismissInsight(
+    @Param('id') id: string,
+    @Param('insightId') insightId: string,
+    @Query('orgId') orgId: string,
+    @Body() body: unknown,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = z
+      .object({
+        snoozeDays: z.number().int().min(1).max(365).optional(),
+        feedback: z.enum(['up', 'down']).optional(),
+        note: z.string().max(2000).optional(),
+      })
+      .safeParse(body ?? {});
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+
+    const [row] = await db
+      .select()
+      .from(insights)
+      .where(and(eq(insights.repoId, repo.id), eq(insights.id, insightId)))
+      .limit(1);
+    if (!row) throw new NotFoundException('Insight not found');
+
+    const snoozedUntil = parsed.data.snoozeDays
+      ? new Date(Date.now() + parsed.data.snoozeDays * 86_400_000)
+      : null;
+
+    const [updated] = await db
+      .update(insights)
+      .set({
+        dismissedAt: parsed.data.snoozeDays ? null : new Date(),
+        snoozedUntil,
+        feedback: parsed.data.feedback ?? row.feedback,
+        feedbackNote: parsed.data.note ?? row.feedbackNote,
+      })
+      .where(eq(insights.id, row.id))
+      .returning();
+    return serializeInsight(updated!);
   }
 
   @Get(':id/entities/:entityId/insights')
@@ -713,6 +770,8 @@ export class ReposController {
     const parsed = AnalyzeBody.safeParse(body ?? {});
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     const repo = await this.requireRepo(id, orgId);
+    await this.quotas.ensureFreeSubscription(repo.orgId);
+    await this.quotas.assertCanAnalyze(repo.orgId);
 
     const [run] = await db
       .insert(analysisRuns)
@@ -745,7 +804,7 @@ export class ReposController {
       .set({ status: 'cloning', lastError: null, updatedAt: new Date() })
       .where(eq(repositories.id, repo.id));
 
-    await this.jobsService.enqueueClone({
+    const clonePayload = {
       jobId: job!.id,
       runId: run!.id,
       repoId: repo.id,
@@ -753,11 +812,18 @@ export class ReposController {
       remoteUrl: repo.remoteUrl,
       defaultBranch: parsed.data.defaultBranch ?? repo.defaultBranch,
       encryptedPat: repo.encryptedPat ?? undefined,
-    });
+    };
+
+    if (orchestratorMode() === 'temporal') {
+      await startAnalysisWorkflow(clonePayload);
+    } else {
+      await this.jobsService.enqueueClone(clonePayload);
+    }
 
     return {
       run: serializeRun(run!),
       job: { id: job!.id, status: job!.status },
+      orchestrator: orchestratorMode(),
     };
   }
 
@@ -778,6 +844,9 @@ export class ReposController {
     if (sampleShas.length === 0) {
       throw new BadRequestException('Run has no sampled SHAs');
     }
+
+    await this.quotas.assertCanEnqueueAi(repo.orgId);
+    await this.quotas.recordAiCall(repo.orgId, 1);
 
     await this.jobsService.enqueueAi({
       jobId: randomUUID(),
@@ -938,6 +1007,8 @@ function serializeRepo(repo: typeof repositories.$inferSelect) {
     cloneUri: repo.cloneUri,
     lastSyncedSha: repo.lastSyncedSha,
     lastError: repo.lastError,
+    precisionMode: repo.precisionMode ?? 'structural',
+    features: repo.features ?? {},
     createdAt: repo.createdAt.toISOString(),
     updatedAt: repo.updatedAt.toISOString(),
   };
@@ -981,6 +1052,9 @@ function serializeInsight(row: typeof insights.$inferSelect) {
     status: row.status,
     suggestedActions: row.suggestedActions ?? [],
     citedSignals: row.citedSignals ?? [],
+    dismissedAt: row.dismissedAt?.toISOString() ?? null,
+    snoozedUntil: row.snoozedUntil?.toISOString() ?? null,
+    feedback: row.feedback ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }

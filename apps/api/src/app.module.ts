@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
+import { BillingModule } from './billing/billing.module';
+import { GithubModule } from './github/github.module';
 import { HealthModule } from './health/health.module';
 import { JobsModule } from './jobs/jobs.module';
 import { OrgsModule } from './orgs/orgs.module';
@@ -27,6 +29,8 @@ import { env } from './config/env';
     OrgsModule,
     ReposModule,
     JobsModule,
+    BillingModule,
+    GithubModule,
   ],
 })
 export class AppModule {}

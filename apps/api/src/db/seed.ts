@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { memberships, organizations, users } from './schema';
+import { memberships, organizations, plans, subscriptions, users } from './schema';
 
 async function main() {
   const url = process.env.DATABASE_URL ?? 'postgresql://gwi:gwi@localhost:5432/gwi';
@@ -58,6 +58,31 @@ async function main() {
       role: 'owner',
     });
     console.log(`Linked ${email} as owner of ${orgSlug}`);
+  }
+
+  // Attach Free plan subscription when plans table exists (Phase 5).
+  try {
+    const [free] = await db.select().from(plans).where(eq(plans.tier, 'free')).limit(1);
+    if (free) {
+      const [sub] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.orgId, org.id))
+        .limit(1);
+      if (!sub) {
+        await db.insert(subscriptions).values({
+          orgId: org.id,
+          planId: free.id,
+          status: 'active',
+        });
+        console.log(`Attached Free plan to ${orgSlug}`);
+      }
+    }
+  } catch (err) {
+    console.warn(
+      'Skipping plan seed (run db:migrate for Phase 5):',
+      err instanceof Error ? err.message : err,
+    );
   }
 
   await pool.end();
