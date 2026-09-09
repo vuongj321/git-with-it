@@ -106,6 +106,13 @@ export const SampleConfigSchema = z.object({
   maxCompareHops: z.number().int().min(1).max(2000).default(200),
   /** Fan-in/out delta threshold for coupling_spike. */
   couplingDeltaThreshold: z.number().int().min(1).default(5),
+  /**
+   * Soft SLA (minutes) for tip-path parse; triggers sample density backoff
+   * when estimated duration exceeds this (Phase 5).
+   */
+  slaMinutes: z.number().int().min(1).max(240).default(30),
+  /** Rough seconds per sampled commit for ETA (local calibration). */
+  secondsPerCommit: z.number().min(0.1).max(120).default(2),
 });
 export type SampleConfig = z.infer<typeof SampleConfigSchema>;
 
@@ -516,3 +523,22 @@ export {
   type ComputeMetricsInput,
   type MetricsSummary,
 } from './metrics';
+
+export {
+  orgRepoPrefix,
+  bareArchiveKey,
+  graphSnapshotKey,
+  graphDeltaKey,
+  graphCheckpointKey,
+  blobParseKey,
+  graphSnapshotCandidates,
+  bareArchiveCandidates,
+  blobParseCandidates,
+} from './storage-keys';
+
+export {
+  applySampleDensityBackoff,
+  estimateParseMinutes,
+  type DensityBackoffInput,
+  type DensityBackoffResult,
+} from './density-backoff';

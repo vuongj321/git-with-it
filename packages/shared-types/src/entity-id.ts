@@ -99,4 +99,4 @@ export function graphRefToEntityId(repoId: string, ref: GraphEntityRef): string 
 }
 
 /** Current analyzer_version stamped on parse artifacts / appearances. */
-export const ANALYZER_VERSION = '0.1.0';
+export const ANALYZER_VERSION = '0.2.0';
