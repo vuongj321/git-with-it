@@ -17,6 +17,7 @@ import {
   CreateRepoBodySchema,
   SampleConfigSchema,
   diffGraphs,
+  graphRefToEntityId,
   isEntityUuid,
   isLikelyGitRemoteUrl,
   type GraphSnapshot,
@@ -144,6 +145,8 @@ const TopMetricsQuery = z.object({
 const InsightsQuery = z.object({
   severity: z.enum(['low', 'medium', 'high', 'critical']).optional(),
   category: z.enum(['debt', 'drift', 'risk', 'refactor', 'hotspot']).optional(),
+  /** Product entity UUID or graph-local ref (`file:…`, `pkg:…`). */
+  entity: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
@@ -583,12 +586,23 @@ export class ReposController {
     if (parsed.severity) conditions.push(eq(insights.severity, parsed.severity));
     if (parsed.category) conditions.push(eq(insights.category, parsed.category));
 
-    const rows = await db
+    const entityFilter = parsed.entity
+      ? isEntityUuid(parsed.entity)
+        ? parsed.entity
+        : graphRefToEntityId(repo.id, parsed.entity)
+      : null;
+
+    let rows = await db
       .select()
       .from(insights)
       .where(and(...conditions))
       .orderBy(desc(insights.createdAt))
-      .limit(parsed.limit);
+      .limit(entityFilter ? parsed.limit * 3 : parsed.limit);
+    if (entityFilter) {
+      rows = rows
+        .filter((row) => (row.entityIds ?? []).includes(entityFilter))
+        .slice(0, parsed.limit);
+    }
     return rows.map(serializeInsight);
   }
 
@@ -617,13 +631,17 @@ export class ReposController {
   ) {
     const repo = await this.requireRepo(id, orgId);
     const parsed = InsightsQuery.parse(query);
+    const decoded = decodeURIComponent(entityId);
+    const resolved = isEntityUuid(decoded)
+      ? decoded
+      : graphRefToEntityId(repo.id, decoded);
     let rows = await db
       .select()
       .from(insights)
       .where(eq(insights.repoId, repo.id))
       .orderBy(desc(insights.createdAt))
       .limit(parsed.limit * 3);
-    rows = rows.filter((row) => (row.entityIds ?? []).includes(entityId));
+    rows = rows.filter((row) => (row.entityIds ?? []).includes(resolved));
     if (parsed.severity) rows = rows.filter((row) => row.severity === parsed.severity);
     if (parsed.category) rows = rows.filter((row) => row.category === parsed.category);
     return rows.slice(0, parsed.limit).map(serializeInsight);

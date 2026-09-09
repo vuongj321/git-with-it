@@ -35,6 +35,7 @@ export function ArchitectureGraph() {
     id: string;
     label: string;
     fqn: string;
+    kind?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,10 +84,15 @@ export function ArchitectureGraph() {
   const selectedInsightsQuery = useQuery({
     queryKey: ['entity-insights', params.repo, selected?.id, orgQuery.data?.id],
     enabled: Boolean(orgQuery.data?.id && selected?.id),
-    queryFn: () =>
-      api<Insight[]>(
-        `/v1/repos/${params.repo}/entities/${selected!.id}/insights?orgId=${orgQuery.data!.id}&limit=5`,
-      ),
+    queryFn: () => {
+      const q = new URLSearchParams({
+        orgId: orgQuery.data!.id,
+        entity: selected!.id,
+        limit: '5',
+      });
+      // Query param avoids path breaks on `pkg:scope/name` and lets the API map graph refs → UUIDv5.
+      return api<Insight[]>(`/v1/repos/${params.repo}/insights?${q.toString()}`);
+    },
   });
 
   const heatMap = useMemo(() => {
@@ -206,6 +212,7 @@ export function ArchitectureGraph() {
           id: node,
           label: String(attrs.label ?? node),
           fqn: String(attrs.fqn ?? node),
+          kind: attrs.kind != null ? String(attrs.kind) : undefined,
         });
         setState({ focus: node });
       });
