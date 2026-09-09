@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Analyzer version stamped into parse artifacts (bump when extraction changes).
-pub const ANALYZER_VERSION: &str = "0.1.0";
+pub const ANALYZER_VERSION: &str = "0.2.0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -11,6 +11,8 @@ pub enum Language {
     Typescript,
     Javascript,
     Python,
+    Go,
+    Java,
 }
 
 impl Language {
@@ -19,6 +21,8 @@ impl Language {
             Self::Typescript => "typescript",
             Self::Javascript => "javascript",
             Self::Python => "python",
+            Self::Go => "go",
+            Self::Java => "java",
         }
     }
 }

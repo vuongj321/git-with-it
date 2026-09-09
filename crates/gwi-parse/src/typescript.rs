@@ -16,7 +16,7 @@ pub fn extract_typescript(
     let lang = match language {
         Language::Javascript => tree_sitter_typescript::LANGUAGE_TSX.into(),
         Language::Typescript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        Language::Python => anyhow::bail!("extract_typescript called with Python"),
+        other => anyhow::bail!("extract_typescript called with {other:?}"),
     };
     let tree = parse_source(lang, source)?;
     let root = tree.root_node();

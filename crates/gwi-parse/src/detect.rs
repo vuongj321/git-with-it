@@ -10,6 +10,8 @@ pub fn detect_language(path: &Path) -> Option<Language> {
         "tsx" => Some(Language::Typescript),
         "js" | "mjs" | "cjs" | "jsx" => Some(Language::Javascript),
         "py" | "pyi" => Some(Language::Python),
+        "go" => Some(Language::Go),
+        "java" => Some(Language::Java),
         _ => None,
     }
 }
@@ -24,6 +26,8 @@ pub fn guess_package(root: &Path, file: &Path) -> Option<String> {
     match lang {
         Language::Typescript | Language::Javascript => nearest_npm_package(root, file),
         Language::Python => nearest_python_package(root, file),
+        Language::Go => nearest_go_module(root, file),
+        Language::Java => nearest_java_package(root, file),
     }
 }
 
@@ -83,6 +87,83 @@ fn nearest_python_package(root: &Path, file: &Path) -> Option<String> {
     } else {
         // package = top-level segment
         Some(module.split('.').next()?.to_string())
+    }
+}
+
+fn nearest_go_module(root: &Path, file: &Path) -> Option<String> {
+    let mut dir = file.parent()?.to_path_buf();
+    loop {
+        let gomod = dir.join("go.mod");
+        if gomod.is_file() {
+            if let Ok(text) = std::fs::read_to_string(&gomod) {
+                for line in text.lines() {
+                    let t = line.trim();
+                    if let Some(rest) = t.strip_prefix("module ") {
+                        let module = rest.trim();
+                        if !module.is_empty() {
+                            return Some(module.to_string());
+                        }
+                    }
+                }
+            }
+            return dir.file_name().map(|n| n.to_string_lossy().into_owned());
+        }
+        if dir == root || !dir.starts_with(root) {
+            break;
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
+fn nearest_java_package(root: &Path, file: &Path) -> Option<String> {
+    // Prefer Maven/Gradle roots: src/main/java/... → dotted package from that root.
+    let rel = relative_path(root, file);
+    for marker in ["src/main/java/", "src/test/java/"] {
+        if let Some(idx) = rel.find(marker) {
+            let rest = &rel[idx + marker.len()..];
+            let dir = rest.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+            if !dir.is_empty() {
+                return Some(dir.replace('/', "."));
+            }
+        }
+    }
+    // Heuristic: walk up for pom.xml / build.gradle then use path under src/
+    let mut dir = file.parent()?.to_path_buf();
+    let mut build_root: Option<PathBuf> = None;
+    loop {
+        if dir.join("pom.xml").is_file()
+            || dir.join("build.gradle").is_file()
+            || dir.join("build.gradle.kts").is_file()
+        {
+            build_root = Some(dir.clone());
+            break;
+        }
+        if dir == root || !dir.starts_with(root) {
+            break;
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    let base = build_root.unwrap_or_else(|| root.to_path_buf());
+    let rel = relative_path(&base, file);
+    for marker in ["src/main/java/", "src/test/java/", "src/"] {
+        if let Some(rest) = rel.strip_prefix(marker) {
+            let dir = rest.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+            if !dir.is_empty() {
+                return Some(dir.replace('/', "."));
+            }
+        }
+    }
+    let parent = file.parent()?;
+    let rel = relative_path(root, parent);
+    if rel.is_empty() {
+        None
+    } else {
+        Some(rel.replace('/', "."))
     }
 }
 

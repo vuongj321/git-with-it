@@ -2,6 +2,8 @@
 
 mod detect;
 mod fqn;
+mod go;
+mod java;
 mod model;
 mod python;
 mod typescript;
@@ -36,6 +38,8 @@ pub fn parse_file(root: Option<&Path>, path: &Path) -> Result<FileParseResult> {
             typescript::extract_typescript(&rel, &source, language, package)
         }
         Language::Python => python::extract_python(&rel, &source, package),
+        Language::Go => go::extract_go(&rel, &source, package),
+        Language::Java => java::extract_java(&rel, &source, package),
     }
 }
 
@@ -50,6 +54,8 @@ pub fn parse_source_str(
             typescript::extract_typescript(path, source, language, package)
         }
         Language::Python => python::extract_python(path, source, package),
+        Language::Go => go::extract_go(path, source, package),
+        Language::Java => java::extract_java(path, source, package),
     }
 }
 
@@ -66,7 +72,14 @@ pub fn parse_dir(root: &Path) -> Result<Vec<FileParseResult>> {
         if rel.split('/').any(|p| {
             matches!(
                 p,
-                "node_modules" | ".git" | "dist" | "build" | "__pycache__" | ".venv" | "target"
+                "node_modules"
+                    | ".git"
+                    | "dist"
+                    | "build"
+                    | "__pycache__"
+                    | ".venv"
+                    | "target"
+                    | "vendor"
             )
         }) {
             continue;
@@ -114,6 +127,32 @@ pub fn collect_package_symbols(root: &Path) -> Vec<Symbol> {
                     let rest = rest.trim().trim_start_matches('=').trim();
                     let name = rest.trim_matches('"').trim_matches('\'');
                     if !name.is_empty() && !name.contains('[') {
+                        symbols.push(Symbol {
+                            kind: SymbolKind::Package,
+                            name: name.to_string(),
+                            fqn: name.to_string(),
+                            span: Span {
+                                start_line: 1,
+                                start_col: 0,
+                                end_line: 1,
+                                end_col: 0,
+                            },
+                            export: true,
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    let gomod = root.join("go.mod");
+    if gomod.is_file() {
+        if let Ok(text) = read_text(&gomod) {
+            for line in text.lines() {
+                let t = line.trim();
+                if let Some(rest) = t.strip_prefix("module ") {
+                    let name = rest.trim();
+                    if !name.is_empty() {
                         symbols.push(Symbol {
                             kind: SymbolKind::Package,
                             name: name.to_string(),

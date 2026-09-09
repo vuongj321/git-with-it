@@ -105,8 +105,58 @@ fn py_mini_extracts_modules_classes_methods_imports() {
 }
 
 #[test]
+fn go_mini_extracts_types_methods_imports() {
+    let root = testdata("repos/go-mini");
+    let results = parse_dir(&root).expect("parse go-mini");
+    assert!(results.len() >= 2);
+
+    let fqns: Vec<_> = results
+        .iter()
+        .flat_map(|r| r.symbols.iter().map(|s| s.fqn.as_str()))
+        .collect();
+    assert!(fqns.iter().any(|f| f.ends_with("payments.Service")));
+    assert!(fqns.iter().any(|f| f.ends_with("payments.Service.Charge")));
+    assert!(fqns.iter().any(|f| f.ends_with("payments.ApplyFee")));
+    assert!(fqns.iter().any(|f| f.ends_with("payments.Payable")));
+    assert!(fqns.iter().any(|f| f.ends_with("payments.RunCheckout")));
+
+    let imports: Vec<_> = results
+        .iter()
+        .flat_map(|r| r.refs.iter())
+        .filter(|r| matches!(r.kind, gwi_parse::RefKind::Import))
+        .map(|r| r.raw.as_str())
+        .collect();
+    assert!(imports.contains(&"fmt"));
+}
+
+#[test]
+fn java_mini_extracts_classes_methods_imports() {
+    let root = testdata("repos/java-mini");
+    let results = parse_dir(&root).expect("parse java-mini");
+    assert!(results.len() >= 3);
+
+    let fqns: Vec<_> = results
+        .iter()
+        .flat_map(|r| r.symbols.iter().map(|s| s.fqn.as_str()))
+        .collect();
+    assert!(fqns.contains(&"com.gwi.payments.PaymentService"));
+    assert!(fqns.contains(&"com.gwi.payments.PaymentService.charge"));
+    assert!(fqns.contains(&"com.gwi.payments.Payable"));
+    assert!(fqns.contains(&"com.gwi.payments.Checkout"));
+    assert!(fqns.contains(&"com.gwi.payments.Checkout.runCheckout"));
+
+    let imports: Vec<_> = results
+        .iter()
+        .flat_map(|r| r.refs.iter())
+        .filter(|r| matches!(r.kind, gwi_parse::RefKind::Import))
+        .map(|r| r.raw.as_str())
+        .collect();
+    assert!(imports.iter().any(|i| i.contains("PaymentService")));
+}
+
+#[test]
 fn golden_summaries_match() {
-    for name in ["ts-mini", "py-mini"] {
+    for name in ["ts-mini", "py-mini", "go-mini", "java-mini"] {
         let root = testdata(&format!("repos/{name}"));
         let results = parse_dir(&root).unwrap();
         let actual = serde_json::json!({
