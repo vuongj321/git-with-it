@@ -32,6 +32,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.712.0
+        version: 3.1103.0
       '@clickhouse/client':
         specifier: ^1.23.1
         version: 1.23.1

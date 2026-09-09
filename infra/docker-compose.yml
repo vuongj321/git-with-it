@@ -79,6 +79,11 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
+    environment:
+      # Without these, the image disables network access for `default` (HTTP 403).
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: gwi
     ports:
       - "8123:8123"
       - "9009:9000"

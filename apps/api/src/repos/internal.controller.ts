@@ -51,6 +51,7 @@ import {
 import { JobsService } from '../jobs/jobs.service';
 import { writeMetricRows } from '../metrics/clickhouse';
 import { invalidateRepoCaches } from '../cache/redis-cache';
+import { loadGraphDiff, loadGraphSnapshot } from '../storage/s3';
 import type { MetricRow } from '@gwi/shared-types';
 
 const UpdateRunBody = z.object({
@@ -144,33 +145,46 @@ const UpsertEntitiesBody = z.object({
   ),
 });
 
-const GraphSnapshotBody = z.object({
-  sha: z.string().min(7),
-  analyzerVersion: z.string().min(1),
-  nodes: z.array(
-    z.object({
-      id: z.string(),
-      kind: z.string(),
-      fqn: z.string(),
-      name: z.string(),
-      path: z.string().nullable().optional(),
-      language: z.string().nullable().optional(),
-      package: z.string().nullable().optional(),
-    }),
-  ),
-  edges: z.array(
-    z.object({
-      from: z.string(),
-      to: z.string(),
-      rel: z.string(),
-    }),
-  ),
+const GraphNodeBody = z.object({
+  id: z.string(),
+  kind: z.string(),
+  fqn: z.string(),
+  name: z.string(),
+  path: z.string().nullable().optional(),
+  language: z.string().nullable().optional(),
+  package: z.string().nullable().optional(),
 });
 
-const TemporalSnapshotBody = GraphSnapshotBody.extend({
-  topoIndex: z.number().int().min(0),
-  replaceRepo: z.boolean().optional().default(false),
+const GraphEdgeBody = z.object({
+  from: z.string(),
+  to: z.string(),
+  rel: z.string(),
 });
+
+/** Prefer MinIO artifactUri; inline nodes/edges kept for small fixtures / backwards compat. */
+const GraphSnapshotBody = z
+  .object({
+    sha: z.string().min(7),
+    analyzerVersion: z.string().min(1),
+    artifactUri: z.string().min(1).optional(),
+    nodes: z.array(GraphNodeBody).optional(),
+    edges: z.array(GraphEdgeBody).optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (!val.artifactUri && (!val.nodes || !val.edges)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'artifactUri or nodes+edges required',
+      });
+    }
+  });
+
+const TemporalSnapshotBody = GraphSnapshotBody.and(
+  z.object({
+    topoIndex: z.number().int().min(0),
+    replaceRepo: z.boolean().optional().default(false),
+  }),
+);
 
 const TemporalBootstrapBody = TemporalSnapshotBody;
 
@@ -180,20 +194,13 @@ const GraphDeltaBody = z.object({
   toSha: z.string().min(7),
   fromTopo: z.number().int(),
   toTopo: z.number().int(),
+  /** Compressed GraphDiff in MinIO (.json.gz / .json.zst). */
   artifactUri: z.string().min(1),
-  edgesAdded: z.array(z.object({ from: z.string(), to: z.string(), rel: z.string() })),
-  edgesRemoved: z.array(z.object({ from: z.string(), to: z.string(), rel: z.string() })),
-  nodes: z.array(
-    z.object({
-      id: z.string(),
-      kind: z.string(),
-      fqn: z.string(),
-      name: z.string(),
-      path: z.string().nullable().optional(),
-      language: z.string().nullable().optional(),
-      package: z.string().nullable().optional(),
-    }),
-  ),
+  /** Optional snapshot key; defaults to repos/{repoId}/graphs/{toSha}.json */
+  snapshotUri: z.string().min(1).optional(),
+  edgesAdded: z.array(GraphEdgeBody).optional(),
+  edgesRemoved: z.array(GraphEdgeBody).optional(),
+  nodes: z.array(GraphNodeBody).optional(),
   analyzerVersion: z.string().min(1),
   nodesAdded: z.number().int().default(0),
   nodesRemoved: z.number().int().default(0),
@@ -860,44 +867,47 @@ export class InternalController {
   async writeSnapshot(@Param('repoId') repoId: string, @Body() body: unknown) {
     const parsed = GraphSnapshotBody.parse(body);
     await this.requireRepo(repoId);
+    const graph = await this.resolveGraphPayload(repoId, parsed);
 
     await writeTemporalSnapshot({
       repoId,
       sha: parsed.sha,
       topoIndex: 0,
       analyzerVersion: parsed.analyzerVersion,
-      nodes: parsed.nodes,
-      edges: parsed.edges,
+      nodes: graph.nodes,
+      edges: graph.edges,
       replaceRepo: true,
     });
 
-    return { ok: true, nodes: parsed.nodes.length, edges: parsed.edges.length };
+    return { ok: true, nodes: graph.nodes.length, edges: graph.edges.length };
   }
 
   @Post('repos/:repoId/graph/temporal-snapshot')
   async temporalSnapshot(@Param('repoId') repoId: string, @Body() body: unknown) {
     const parsed = TemporalSnapshotBody.parse(body);
     await this.requireRepo(repoId);
+    const graph = await this.resolveGraphPayload(repoId, parsed);
     await writeTemporalSnapshot({
       repoId,
       sha: parsed.sha,
       topoIndex: parsed.topoIndex,
       analyzerVersion: parsed.analyzerVersion,
-      nodes: parsed.nodes,
-      edges: parsed.edges,
+      nodes: graph.nodes,
+      edges: graph.edges,
       replaceRepo: parsed.replaceRepo,
     });
-    return { ok: true };
+    return { ok: true, nodes: graph.nodes.length, edges: graph.edges.length };
   }
 
   @Post('repos/:repoId/graph/temporal-bootstrap')
   async temporalBootstrap(@Param('repoId') repoId: string, @Body() body: unknown) {
     const parsed = TemporalBootstrapBody.parse(body);
     await this.requireRepo(repoId);
+    const graph = await this.resolveGraphPayload(repoId, parsed);
     await upsertTemporalNodes({
       repoId,
       analyzerVersion: parsed.analyzerVersion,
-      nodes: parsed.nodes,
+      nodes: graph.nodes,
     });
     // Only add edges that aren't already open — MVP: apply as added at this topo
     await applyTemporalEdgeDelta({
@@ -905,10 +915,10 @@ export class InternalController {
       sha: parsed.sha,
       topoIndex: parsed.topoIndex,
       analyzerVersion: parsed.analyzerVersion,
-      edgesAdded: parsed.edges,
+      edgesAdded: graph.edges,
       edgesRemoved: [],
     });
-    return { ok: true };
+    return { ok: true, nodes: graph.nodes.length, edges: graph.edges.length };
   }
 
   @Post('repos/:repoId/graph/delta')
@@ -916,18 +926,32 @@ export class InternalController {
     const parsed = GraphDeltaBody.parse(body);
     await this.requireRepo(repoId);
 
+    let nodes = parsed.nodes ?? [];
+    let edgesAdded = parsed.edgesAdded ?? [];
+    let edgesRemoved = parsed.edgesRemoved ?? [];
+
+    if (nodes.length === 0) {
+      const snap = await loadGraphSnapshot(repoId, parsed.toSha, parsed.snapshotUri);
+      nodes = snap.nodes;
+    }
+    if (edgesAdded.length === 0 && edgesRemoved.length === 0) {
+      const diff = await loadGraphDiff(parsed.artifactUri);
+      edgesAdded = diff.edgesAdded;
+      edgesRemoved = diff.edgesRemoved;
+    }
+
     await upsertTemporalNodes({
       repoId,
       analyzerVersion: parsed.analyzerVersion,
-      nodes: parsed.nodes,
+      nodes,
     });
     await applyTemporalEdgeDelta({
       repoId,
       sha: parsed.toSha,
       topoIndex: parsed.toTopo,
       analyzerVersion: parsed.analyzerVersion,
-      edgesAdded: parsed.edgesAdded,
-      edgesRemoved: parsed.edgesRemoved,
+      edgesAdded,
+      edgesRemoved,
     });
 
     await db
@@ -942,8 +966,8 @@ export class InternalController {
         artifactUri: parsed.artifactUri,
         nodesAdded: parsed.nodesAdded,
         nodesRemoved: parsed.nodesRemoved,
-        edgesAdded: parsed.edgesAddedCount,
-        edgesRemoved: parsed.edgesRemovedCount,
+        edgesAdded: parsed.edgesAddedCount || edgesAdded.length,
+        edgesRemoved: parsed.edgesRemovedCount || edgesRemoved.length,
         isCheckpoint: false,
       })
       .onConflictDoUpdate({
@@ -952,8 +976,8 @@ export class InternalController {
           artifactUri: parsed.artifactUri,
           nodesAdded: parsed.nodesAdded,
           nodesRemoved: parsed.nodesRemoved,
-          edgesAdded: parsed.edgesAddedCount,
-          edgesRemoved: parsed.edgesRemovedCount,
+          edgesAdded: parsed.edgesAddedCount || edgesAdded.length,
+          edgesRemoved: parsed.edgesRemovedCount || edgesRemoved.length,
         },
       });
 
@@ -1128,6 +1152,30 @@ export class InternalController {
       insights: parsed.insights.length,
       providerState: parsed.providerState,
     };
+  }
+
+  private async resolveGraphPayload(
+    repoId: string,
+    parsed: {
+      sha: string;
+      artifactUri?: string;
+      nodes?: Array<{
+        id: string;
+        kind: string;
+        fqn: string;
+        name: string;
+        path?: string | null;
+        language?: string | null;
+        package?: string | null;
+      }>;
+      edges?: Array<{ from: string; to: string; rel: string }>;
+    },
+  ) {
+    if (parsed.artifactUri || !parsed.nodes || !parsed.edges) {
+      const snap = await loadGraphSnapshot(repoId, parsed.sha, parsed.artifactUri);
+      return { nodes: snap.nodes, edges: snap.edges };
+    }
+    return { nodes: parsed.nodes, edges: parsed.edges };
   }
 
   private async requireRunRepo(runId: string) {

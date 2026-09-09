@@ -1,4 +1,36 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { z } from 'zod';
+
+/** Load monorepo-root `.env` when nest/turbo cwd is `apps/api` (does not override existing env). */
+function loadRootEnvFile() {
+  const candidates = [
+    resolve(process.cwd(), '.env'),
+    resolve(process.cwd(), '../.env'),
+    resolve(process.cwd(), '../../.env'),
+  ];
+  for (const file of candidates) {
+    if (!existsSync(file)) continue;
+    for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let value = trimmed.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (process.env[key] === undefined) process.env[key] = value;
+    }
+    break;
+  }
+}
+
+loadRootEnvFile();
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -14,8 +46,18 @@ const EnvSchema = z.object({
   NEO4J_PASSWORD: z.string().default('gwi-local-dev'),
   CLICKHOUSE_URL: z.string().default('http://localhost:8123'),
   CLICKHOUSE_USER: z.string().default('default'),
-  CLICKHOUSE_PASSWORD: z.string().default(''),
+  // Must match infra/docker-compose.yml (empty password disables network auth in the image).
+  CLICKHOUSE_PASSWORD: z.string().default('gwi'),
   CLICKHOUSE_DATABASE: z.string().default('default'),
+  S3_ENDPOINT: z.string().default('http://localhost:9000'),
+  S3_ACCESS_KEY: z.string().default('gwiadmin'),
+  S3_SECRET_KEY: z.string().default('gwiadmin123'),
+  S3_BUCKET: z.string().default('gwi-artifacts'),
+  S3_REGION: z.string().default('us-east-1'),
+  S3_FORCE_PATH_STYLE: z
+    .string()
+    .optional()
+    .transform((v) => v !== 'false'),
 });
 
 function loadEnv() {
@@ -38,6 +80,12 @@ function loadEnv() {
     CLICKHOUSE_USER: process.env.CLICKHOUSE_USER,
     CLICKHOUSE_PASSWORD: process.env.CLICKHOUSE_PASSWORD,
     CLICKHOUSE_DATABASE: process.env.CLICKHOUSE_DATABASE,
+    S3_ENDPOINT: process.env.S3_ENDPOINT,
+    S3_ACCESS_KEY: process.env.S3_ACCESS_KEY,
+    S3_SECRET_KEY: process.env.S3_SECRET_KEY,
+    S3_BUCKET: process.env.S3_BUCKET,
+    S3_REGION: process.env.S3_REGION,
+    S3_FORCE_PATH_STYLE: process.env.S3_FORCE_PATH_STYLE,
   });
   if (!parsed.success) {
     console.error(parsed.error.flatten());

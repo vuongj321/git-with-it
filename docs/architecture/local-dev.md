@@ -16,7 +16,7 @@ make up
 | Redis 7 | `6379` | BullMQ clone queue + session stub |
 | MinIO | `9000` (S3), `9001` (console) | `gwiadmin` / `gwiadmin123`, bucket `gwi-artifacts` |
 | Neo4j 5 | `7474` (HTTP), `7687` (Bolt) | `neo4j` / `gwi-local-dev` — Phase 1 sha-tagged graph snapshots
-| ClickHouse | `8123` (HTTP), `9009` (native) | **provision only**, no writes until Phase 3 |
+| ClickHouse | `8123` (HTTP), `9009` (native) | `default` / `gwi` — metrics (Phase 3+) |
 
 App processes (not in Compose by default):
 

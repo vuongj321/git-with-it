@@ -182,14 +182,14 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
     });
 
     await uploadSnapshot(s3, payload.repoId, tipSha, tipGraph.snapshot);
+    const tipArtifactUri = `repos/${payload.repoId}/graphs/${tipSha}.json`;
     await apiJson(`/v1/internal/repos/${payload.repoId}/graph/temporal-snapshot`, {
       method: 'POST',
       body: {
         sha: tipSha,
         topoIndex: tipTopo,
         analyzerVersion: payload.analyzerVersion,
-        nodes: tipGraph.snapshot.nodes,
-        edges: tipGraph.snapshot.edges,
+        artifactUri: tipArtifactUri,
         replaceRepo: true,
       },
     });
@@ -256,9 +256,7 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
             fromTopo: i - 1,
             toTopo: i,
             artifactUri: deltaUri,
-            edgesAdded: diff.edgesAdded,
-            edgesRemoved: diff.edgesRemoved,
-            nodes: parsed.snapshot.nodes,
+            snapshotUri: `repos/${payload.repoId}/graphs/${sha}.json`,
             analyzerVersion: payload.analyzerVersion,
             nodesAdded: diff.nodesAdded.length,
             nodesRemoved: diff.nodesRemoved.length,
@@ -303,8 +301,7 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
             sha,
             topoIndex: i,
             analyzerVersion: payload.analyzerVersion,
-            nodes: parsed.snapshot.nodes,
-            edges: parsed.snapshot.edges,
+            artifactUri: `repos/${payload.repoId}/graphs/${sha}.json`,
           },
         });
       }
