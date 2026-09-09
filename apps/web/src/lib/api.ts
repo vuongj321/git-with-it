@@ -50,6 +50,11 @@ export type Run = {
   id: string;
   repoId: string;
   status: string;
+  analyzerVersion?: string | null;
+  commitSha?: string | null;
+  sampleShas?: string[];
+  commitsDone?: number;
+  commitsTotal?: number;
   triggeredBy: string | null;
   error: string | null;
   createdAt: string;

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Phase 1)
+Superseded by [ADR 0009](0009-temporal-edges-checkpoints.md) for Phase 2+ writes
 
 ## Context
 
@@ -23,4 +23,4 @@ Temporal `valid_from` / `valid_to` edges are deferred to Phase 2.
 
 - Simple MVP queries: `MATCH (n {repo_id, sha}) …`
 - Storage grows with re-analyzed SHAs (acceptable while sampling is tip-only).
-- Migration path: Phase 2 introduces interval edges without changing Postgres entity IDs.
+- Migration path: Phase 2 introduces interval edges without changing Postgres entity IDs (see ADR 0009).

@@ -4,25 +4,25 @@ overview: Add sampled multi-commit analysis, incremental parsing, temporal edge 
 todos:
   - id: p2-sampling
     content: Commit walk, topo_index, sampling policy, commits/commit_samples persistence
-    status: pending
+    status: completed
   - id: p2-incremental-parse
     content: "Incremental parse: diff-tree, blob cache, reverse-import invalidation, rename chains"
-    status: pending
+    status: completed
   - id: p2-temporal-graph
     content: Migrate to temporal Neo4j edges + S3 checkpoints/delta log; single-writer-per-repo
-    status: pending
+    status: completed
   - id: p2-graph-diff
     content: Implement gwi-diff node/edge/SCC diff + GraphDiff artifacts
-    status: pending
+    status: completed
   - id: p2-evolution-events
     content: Evolution event rules engine + evolution_events table
-    status: pending
+    status: completed
   - id: p2-pipeline
     content: Wire enumerate/parse/delta/checkpoint/evolve jobs with progressive tip-first delivery
-    status: pending
+    status: completed
   - id: p2-api-tests
     content: "APIs: sampled commits, graph@sha, graph/diff, timeline, compare; CI goldens"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -199,10 +199,10 @@ Refuse unbounded compare when no checkpoint path exists and hop count exceeds li
 
 ## Deliverables checklist
 
-- [ ] Sampled commit walk + topo_index
-- [ ] Incremental parse + invalidation
-- [ ] Temporal Neo4j + checkpoints/deltas
-- [ ] gwi-diff + evolution_events
-- [ ] Diff + timeline APIs
-- [ ] CI goldens for cycle + rename
-- [ ] ADRs merged
+- [x] Sampled commit walk + topo_index
+- [x] Incremental parse + invalidation
+- [x] Temporal Neo4j + checkpoints/deltas
+- [x] gwi-diff + evolution_events
+- [x] Diff + timeline APIs
+- [x] CI goldens for cycle + rename
+- [x] ADRs merged
