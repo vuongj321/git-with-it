@@ -50,7 +50,6 @@ export async function startAnalysisWorkflow(
   };
   let Connection: { connect: (opts: { address: string }) => Promise<unknown> };
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require('@temporalio/client') as {
       Client: typeof Client;
       Connection: typeof Connection;
@@ -82,7 +81,6 @@ export async function cancelAnalysisWorkflow(workflowId: string): Promise<void> 
     log.warn(`cancel stub for ${workflowId}`);
     return;
   }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const mod = require('@temporalio/client') as {
     Client: new (opts: unknown) => {
       workflow: { getHandle: (id: string) => { cancel: () => Promise<void> } };

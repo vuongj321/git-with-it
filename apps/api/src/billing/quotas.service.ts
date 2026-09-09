@@ -188,7 +188,7 @@ export class QuotasService {
       .where(eq(subscriptions.orgId, orgId))
       .limit(1);
     if (existing) return existing;
-    let [free] = await db.select().from(plans).where(eq(plans.tier, 'free')).limit(1);
+    const [free] = await db.select().from(plans).where(eq(plans.tier, 'free')).limit(1);
     if (!free) {
       throw new ServiceUnavailableException('plans table not seeded; run migrations');
     }
