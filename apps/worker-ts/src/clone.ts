@@ -123,12 +123,12 @@ export async function processCloneJob(payload: CloneJobPayload) {
       analyzerVersion: ANALYZER_VERSION,
       error: null,
     });
-    log.info({ cloneUri, sha }, 'clone ready; enqueue parse');
+    log.info({ cloneUri, sha }, 'clone ready; enqueue enumerate_sample');
 
-    await apiJson(`/v1/internal/runs/${payload.runId}/enqueue-parse`, {
+    await apiJson(`/v1/internal/runs/${payload.runId}/enqueue-enumerate`, {
       method: 'POST',
       body: {
-        commitSha: sha,
+        tipSha: sha,
         cloneUri,
         analyzerVersion: ANALYZER_VERSION,
       },

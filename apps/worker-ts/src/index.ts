@@ -1,13 +1,19 @@
 import { Worker } from 'bullmq';
 import {
   CloneJobPayloadSchema,
+  EnumerateSampleJobPayloadSchema,
+  EvolveJobPayloadSchema,
   GraphWriteJobPayloadSchema,
+  ParseCommitJobPayloadSchema,
   ParseJobPayloadSchema,
 } from '@gwi/shared-types';
 import { processCloneJob } from './clone';
+import { processEnumerateSampleJob } from './enumerate';
 import { env } from './env';
+import { processEvolveJob } from './evolve';
 import { processGraphWriteJob } from './graph-write';
 import { logger } from './logger';
+import { processParseCommitJob } from './parse-commit';
 import { processParseJob } from './parse';
 
 const connection = { url: env.REDIS_URL };
@@ -21,11 +27,30 @@ const cloneWorker = new Worker(
   { connection, concurrency: 2 },
 );
 
+const enumerateWorker = new Worker(
+  'enumerate_sample',
+  async (job) => {
+    const payload = EnumerateSampleJobPayloadSchema.parse(job.data);
+    await processEnumerateSampleJob(payload);
+  },
+  { connection, concurrency: 1 },
+);
+
 const parseWorker = new Worker(
   'parse',
   async (job) => {
     const payload = ParseJobPayloadSchema.parse(job.data);
     await processParseJob(payload);
+  },
+  { connection, concurrency: 1 },
+);
+
+/** Single-writer-per-repo for Neo4j deltas: concurrency 1 on this queue. */
+const parseCommitWorker = new Worker(
+  'parse_commit',
+  async (job) => {
+    const payload = ParseCommitJobPayloadSchema.parse(job.data);
+    await processParseCommitJob(payload);
   },
   { connection, concurrency: 1 },
 );
@@ -39,10 +64,22 @@ const graphWorker = new Worker(
   { connection, concurrency: 1 },
 );
 
+const evolveWorker = new Worker(
+  'evolve',
+  async (job) => {
+    const payload = EvolveJobPayloadSchema.parse(job.data);
+    await processEvolveJob(payload);
+  },
+  { connection, concurrency: 1 },
+);
+
 for (const [name, worker] of [
   ['clone', cloneWorker],
+  ['enumerate_sample', enumerateWorker],
   ['parse', parseWorker],
+  ['parse_commit', parseCommitWorker],
   ['graph_write', graphWorker],
+  ['evolve', evolveWorker],
 ] as const) {
   worker.on('ready', () => logger.info({ queue: name }, 'worker ready'));
   worker.on('completed', (job) =>
@@ -55,7 +92,14 @@ for (const [name, worker] of [
 
 async function shutdown() {
   logger.info('shutting down worker');
-  await Promise.all([cloneWorker.close(), parseWorker.close(), graphWorker.close()]);
+  await Promise.all([
+    cloneWorker.close(),
+    enumerateWorker.close(),
+    parseWorker.close(),
+    parseCommitWorker.close(),
+    graphWorker.close(),
+    evolveWorker.close(),
+  ]);
   process.exit(0);
 }
 
