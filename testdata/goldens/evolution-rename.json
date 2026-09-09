@@ -1,0 +1,6 @@
+{
+  "fromSha": "ccc3333",
+  "toSha": "ddd4444",
+  "rename": { "from": "file:src/old.ts", "to": "file:src/new.ts" },
+  "expectEventTypes": ["rename_detected"]
+}

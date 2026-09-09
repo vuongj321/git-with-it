@@ -1,0 +1,5 @@
+{
+  "fromSha": "aaa1111",
+  "toSha": "bbb2222",
+  "expectEventTypes": ["dependency_added", "cycle_introduced"]
+}

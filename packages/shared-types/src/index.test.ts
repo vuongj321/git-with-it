@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   CreateRepoBodySchema,
+  diffGraphs,
   entityId,
+  eventsFromDiff,
+  findSccs,
   GWI_ENTITY_NAMESPACE,
   isLikelyGitRemoteUrl,
+  sampleFirstParentCommits,
   uuidv5,
+  type GraphSnapshot,
+  type WalkedCommit,
 } from './index';
 
 describe('isLikelyGitRemoteUrl', () => {
@@ -72,5 +78,109 @@ describe('entityId / uuidv5', () => {
         'src/pay.ts#refund',
       ),
     ).not.toBe(base);
+  });
+});
+
+function commit(
+  sha: string,
+  depth: number,
+  authoredAt: Date,
+): WalkedCommit {
+  return {
+    sha,
+    parentShas: [],
+    authoredAt,
+    message: sha,
+    depthFromTip: depth,
+  };
+}
+
+describe('sampleFirstParentCommits', () => {
+  it('always includes tip and last N window', () => {
+    const walked = Array.from({ length: 10 }, (_, i) =>
+      commit(`c${i}`, i, new Date('2024-01-01T00:00:00Z')),
+    );
+    const samples = sampleFirstParentCommits(walked, {
+      lastN: 3,
+      monthlyAnchors: false,
+    });
+    expect(samples.map((s) => s.sha)).toEqual(['c2', 'c1', 'c0']);
+    expect(samples.map((s) => s.topoIndex)).toEqual([0, 1, 2]);
+    expect(samples[samples.length - 1]!.reason).toBe('tip');
+  });
+
+  it('adds monthly anchors beyond the window', () => {
+    const walked = [
+      commit('tip', 0, new Date('2024-06-15T00:00:00Z')),
+      commit('w1', 1, new Date('2024-06-01T00:00:00Z')),
+      commit('old', 5, new Date('2024-01-10T00:00:00Z')),
+      commit('older', 6, new Date('2024-01-01T00:00:00Z')),
+    ];
+    const samples = sampleFirstParentCommits(walked, {
+      lastN: 2,
+      monthlyAnchors: true,
+    });
+    const shas = samples.map((s) => s.sha);
+    expect(shas).toContain('tip');
+    expect(shas).toContain('w1');
+    expect(shas).toContain('old');
+    expect(samples.find((s) => s.sha === 'old')?.reason).toBe('monthly_anchor');
+  });
+});
+
+describe('findSccs / cycle_introduced golden', () => {
+  it('detects a new cycle between shas', () => {
+    const from: GraphSnapshot = {
+      sha: 'aaa1111',
+      nodes: [
+        { id: 'file:a.ts', kind: 'file', fqn: 'a.ts', name: 'a.ts' },
+        { id: 'file:b.ts', kind: 'file', fqn: 'b.ts', name: 'b.ts' },
+      ],
+      edges: [
+        { from: 'file:a.ts', to: 'file:b.ts', rel: 'DEPENDS_ON' },
+      ],
+    };
+    const to: GraphSnapshot = {
+      sha: 'bbb2222',
+      nodes: from.nodes,
+      edges: [
+        { from: 'file:a.ts', to: 'file:b.ts', rel: 'DEPENDS_ON' },
+        { from: 'file:b.ts', to: 'file:a.ts', rel: 'DEPENDS_ON' },
+      ],
+    };
+    expect(findSccs(from.edges, from.nodes.map((n) => n.id))).toHaveLength(0);
+    expect(findSccs(to.edges, to.nodes.map((n) => n.id))).toHaveLength(1);
+
+    const diff = diffGraphs(from, to);
+    expect(diff.sccsAdded).toHaveLength(1);
+    const events = eventsFromDiff(diff);
+    expect(events.some((e) => e.type === 'cycle_introduced')).toBe(true);
+    expect(events.some((e) => e.type === 'dependency_added')).toBe(true);
+  });
+});
+
+describe('rename_detected golden', () => {
+  it('aligns renamed file ids and emits rename_detected', () => {
+    const from: GraphSnapshot = {
+      sha: 'ccc3333',
+      nodes: [
+        { id: 'file:src/old.ts', kind: 'file', fqn: 'src/old.ts', name: 'old.ts' },
+      ],
+      edges: [],
+    };
+    const to: GraphSnapshot = {
+      sha: 'ddd4444',
+      nodes: [
+        { id: 'file:src/new.ts', kind: 'file', fqn: 'src/new.ts', name: 'new.ts' },
+      ],
+      edges: [],
+    };
+    const renameMap = new Map([['file:src/old.ts', 'file:src/new.ts']]);
+    const diff = diffGraphs(from, to, { renameMap });
+    expect(diff.nodesRenamed).toHaveLength(1);
+    expect(diff.nodesAdded).toHaveLength(0);
+    expect(diff.nodesRemoved).toHaveLength(0);
+    const events = eventsFromDiff(diff);
+    expect(events.some((e) => e.type === 'rename_detected')).toBe(true);
   });
 });
