@@ -20,6 +20,7 @@ import {
   isLikelyGitRemoteUrl,
   type GraphSnapshot,
 } from '@gwi/shared-types';
+import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, ilike, or } from 'drizzle-orm';
 import type { Request } from 'express';
 import { z } from 'zod';
@@ -34,6 +35,7 @@ import {
   entities,
   evolutionEvents,
   graphDeltas,
+  insights,
   jobs,
   repositories,
 } from '../db/schema';
@@ -67,6 +69,10 @@ const GraphQuery = z.object({
 
 const EntitiesQuery = z.object({
   q: z.string().min(1).optional(),
+  ids: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : [])),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
@@ -132,6 +138,12 @@ const TopMetricsQuery = z.object({
   metric: z.string().min(1).default('fan_in'),
   view: z.enum(['package', 'file']).default('package'),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+const InsightsQuery = z.object({
+  severity: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+  category: z.enum(['debt', 'drift', 'risk', 'refactor', 'hotspot']).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 @ApiTags('repos')
@@ -558,6 +570,64 @@ export class ReposController {
     }));
   }
 
+  @Get(':id/insights')
+  async listInsights(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = InsightsQuery.parse(query);
+    const conditions = [eq(insights.repoId, repo.id)];
+    if (parsed.severity) conditions.push(eq(insights.severity, parsed.severity));
+    if (parsed.category) conditions.push(eq(insights.category, parsed.category));
+
+    const rows = await db
+      .select()
+      .from(insights)
+      .where(and(...conditions))
+      .orderBy(desc(insights.createdAt))
+      .limit(parsed.limit);
+    return rows.map(serializeInsight);
+  }
+
+  @Get(':id/insights/:insightId')
+  async getInsight(
+    @Param('id') id: string,
+    @Param('insightId') insightId: string,
+    @Query('orgId') orgId: string,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const [row] = await db
+      .select()
+      .from(insights)
+      .where(and(eq(insights.repoId, repo.id), eq(insights.id, insightId)))
+      .limit(1);
+    if (!row) throw new NotFoundException('Insight not found');
+    return serializeInsight(row);
+  }
+
+  @Get(':id/entities/:entityId/insights')
+  async entityInsights(
+    @Param('id') id: string,
+    @Param('entityId') entityId: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = InsightsQuery.parse(query);
+    let rows = await db
+      .select()
+      .from(insights)
+      .where(eq(insights.repoId, repo.id))
+      .orderBy(desc(insights.createdAt))
+      .limit(parsed.limit * 3);
+    rows = rows.filter((row) => (row.entityIds ?? []).includes(entityId));
+    if (parsed.severity) rows = rows.filter((row) => row.severity === parsed.severity);
+    if (parsed.category) rows = rows.filter((row) => row.category === parsed.category);
+    return rows.slice(0, parsed.limit).map(serializeInsight);
+  }
+
   @Get(':id/entities')
   async searchEntities(
     @Param('id') id: string,
@@ -567,7 +637,18 @@ export class ReposController {
     const repo = await this.requireRepo(id, orgId);
     const parsed = EntitiesQuery.parse(query);
     const limit = parsed.limit;
-    const rows = parsed.q
+    const rows = parsed.ids.length
+      ? (await db
+          .select()
+          .from(entities)
+          .where(
+            and(
+              eq(entities.repoId, repo.id),
+              or(...parsed.ids.map((value) => eq(entities.id, value))),
+            ),
+          )
+          .limit(limit))
+      : parsed.q
       ? await db
           .select()
           .from(entities)
@@ -656,6 +737,39 @@ export class ReposController {
       run: serializeRun(run!),
       job: { id: job!.id, status: job!.status },
     };
+  }
+
+  @Post(':id/runs/:runId/insights/regenerate')
+  async regenerateInsights(
+    @Param('id') id: string,
+    @Param('runId') runId: string,
+    @Query('orgId') orgId: string,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const [run] = await db
+      .select()
+      .from(analysisRuns)
+      .where(and(eq(analysisRuns.id, runId), eq(analysisRuns.repoId, repo.id)))
+      .limit(1);
+    if (!run) throw new NotFoundException('Run not found');
+    const sampleShas = (run.sampleShas ?? []).filter(Boolean);
+    if (sampleShas.length === 0) {
+      throw new BadRequestException('Run has no sampled SHAs');
+    }
+
+    await this.jobsService.enqueueAi({
+      jobId: randomUUID(),
+      runId: run.id,
+      repoId: repo.id,
+      orgId: repo.orgId,
+      sampleShas,
+      sampleConfig: (run.sampleConfig as Record<string, unknown> | null) ?? undefined,
+    });
+    await db
+      .update(analysisRuns)
+      .set({ status: 'ai_generating', finishedAt: null })
+      .where(eq(analysisRuns.id, run.id));
+    return { ok: true };
   }
 
   @Get(':id/runs/:runId')
@@ -808,5 +922,29 @@ function serializeRun(run: typeof analysisRuns.$inferSelect) {
     createdAt: run.createdAt.toISOString(),
     startedAt: run.startedAt?.toISOString() ?? null,
     finishedAt: run.finishedAt?.toISOString() ?? null,
+  };
+}
+
+function serializeInsight(row: typeof insights.$inferSelect) {
+  return {
+    id: row.id,
+    repoId: row.repoId,
+    runId: row.runId,
+    headline: row.headline,
+    narrative: row.narrative,
+    severity: row.severity,
+    category: row.category,
+    entityIds: row.entityIds ?? [],
+    fromSha: row.fromSha,
+    toSha: row.toSha,
+    evidenceHash: row.evidenceHash,
+    model: row.model,
+    provider: row.provider,
+    promptHash: row.promptHash,
+    confidence: row.confidence,
+    status: row.status,
+    suggestedActions: row.suggestedActions ?? [],
+    citedSignals: row.citedSignals ?? [],
+    createdAt: row.createdAt.toISOString(),
   };
 }

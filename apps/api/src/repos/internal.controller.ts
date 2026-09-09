@@ -11,10 +11,14 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   ANALYZER_VERSION,
   AnalysisRunStatus,
+  type EvidenceBundle,
   entityId,
   EntityKind,
   EvolutionEventType,
   EvolutionSeverity,
+  InsightCategory,
+  InsightSeverity,
+  InsightStatus,
   JobStatus,
   RepositoryStatus,
   SampleConfigSchema,
@@ -33,6 +37,9 @@ import {
   entityRenames,
   evolutionEvents,
   graphDeltas,
+  insightCandidates,
+  insightEvidence,
+  insights,
   jobs,
   repositories,
 } from '../db/schema';
@@ -83,6 +90,11 @@ const EnqueueParseCommitsBody = z.object({
 });
 
 const EnqueueEvolveBody = z.object({
+  sampleShas: z.array(z.string().min(7)).min(1),
+  sampleConfig: SampleConfigSchema.partial().optional(),
+});
+
+const EnqueueAiBody = z.object({
   sampleShas: z.array(z.string().min(7)).min(1),
   sampleConfig: SampleConfigSchema.partial().optional(),
 });
@@ -255,6 +267,52 @@ const EvolutionEventsBody = z.object({
   ),
 });
 
+const InsightBatchUpsertBody = z.object({
+  runId: z.string().uuid(),
+  analyzerVersion: z.string().nullable().optional(),
+  providerState: z.enum(['published', 'skipped_no_provider']).default('published'),
+  evidence: z.array(
+    z.object({
+      evidenceHash: z.string().min(1),
+      bundle: z.record(z.unknown()),
+    }),
+  ),
+  candidates: z.array(
+    z.object({
+      candidateKey: z.string().min(1),
+      type: z.string().min(1),
+      title: z.string().min(1),
+      score: z.number(),
+      fromSha: z.string().min(7),
+      toSha: z.string().min(7),
+      entityIds: z.array(z.string().uuid()).default([]),
+      signalRefs: z.array(z.string()).default([]),
+      evidenceHash: z.string().min(1).nullable().optional(),
+      status: z.string().default('queued'),
+    }),
+  ),
+  insights: z.array(
+    z.object({
+      candidateKey: z.string().min(1),
+      headline: z.string().min(1),
+      narrative: z.string().min(1),
+      severity: InsightSeverity,
+      category: InsightCategory,
+      entityIds: z.array(z.string().uuid()).default([]),
+      fromSha: z.string().min(7),
+      toSha: z.string().min(7),
+      evidenceHash: z.string().min(1),
+      model: z.string().nullable().optional(),
+      provider: z.string().nullable().optional(),
+      promptHash: z.string().nullable().optional(),
+      confidence: z.number(),
+      status: InsightStatus,
+      suggestedActions: z.array(z.string()).default([]),
+      citedSignals: z.array(z.string()).default([]),
+    }),
+  ),
+});
+
 @ApiTags('internal')
 @ApiBearerAuth()
 @Controller('v1/internal')
@@ -286,7 +344,8 @@ export class InternalController {
       parsed.status === 'parsing' ||
       parsed.status === 'graph_writing' ||
       parsed.status === 'metrics_writing' ||
-      parsed.status === 'evolving'
+      parsed.status === 'evolving' ||
+      parsed.status === 'ai_generating'
     ) {
       runPatch.startedAt = now;
       runPatch.finishedAt = null;
@@ -487,6 +546,41 @@ export class InternalController {
       .returning();
 
     await this.jobsService.enqueueEvolve({
+      jobId: job!.id,
+      runId: run.id,
+      repoId: repo.id,
+      orgId: repo.orgId,
+      sampleShas: parsed.sampleShas,
+      sampleConfig: parsed.sampleConfig,
+    });
+
+    return { ok: true, jobId: job!.id };
+  }
+
+  @Post('runs/:runId/enqueue-ai')
+  async enqueueAi(@Param('runId') runId: string, @Body() body: unknown) {
+    const parsed = EnqueueAiBody.parse(body);
+    const { run, repo } = await this.requireRunRepo(runId);
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        type: 'ai',
+        status: 'queued',
+        orgId: repo.orgId,
+        repoId: repo.id,
+        runId: run.id,
+        progress: 0,
+        payload: { sampleShas: parsed.sampleShas },
+      })
+      .returning();
+
+    await db
+      .update(analysisRuns)
+      .set({ status: 'ai_generating', finishedAt: null })
+      .where(eq(analysisRuns.id, runId));
+
+    await this.jobsService.enqueueAi({
       jobId: job!.id,
       runId: run.id,
       repoId: repo.id,
@@ -916,6 +1010,124 @@ export class InternalController {
     }
 
     return { ok: true, count: parsed.events.length };
+  }
+
+  @Post('repos/:repoId/insights/batch-upsert')
+  async batchUpsertInsights(@Param('repoId') repoId: string, @Body() body: unknown) {
+    const parsed = InsightBatchUpsertBody.parse(body);
+    await this.requireRepo(repoId);
+
+    const evidenceIds = new Map<string, string>();
+    for (const item of parsed.evidence) {
+      const bundle = item.bundle as EvidenceBundle;
+      const [row] = await db
+        .insert(insightEvidence)
+        .values({
+          repoId,
+          runId: parsed.runId,
+          evidenceHash: item.evidenceHash,
+          bundle,
+        })
+        .onConflictDoUpdate({
+          target: [insightEvidence.repoId, insightEvidence.evidenceHash],
+          set: { runId: parsed.runId, bundle, createdAt: new Date() },
+        })
+        .returning();
+      evidenceIds.set(item.evidenceHash, row!.id);
+    }
+
+    const candidateIds = new Map<string, string>();
+    for (const item of parsed.candidates) {
+      const [row] = await db
+        .insert(insightCandidates)
+        .values({
+          repoId,
+          runId: parsed.runId,
+          candidateKey: item.candidateKey,
+          type: item.type,
+          title: item.title,
+          score: item.score,
+          fromSha: item.fromSha,
+          toSha: item.toSha,
+          entityIds: item.entityIds,
+          signalRefs: item.signalRefs,
+          evidenceHash: item.evidenceHash ?? null,
+          status: item.status,
+        })
+        .onConflictDoUpdate({
+          target: [insightCandidates.repoId, insightCandidates.runId, insightCandidates.candidateKey],
+          set: {
+            type: item.type,
+            title: item.title,
+            score: item.score,
+            fromSha: item.fromSha,
+            toSha: item.toSha,
+            entityIds: item.entityIds,
+            signalRefs: item.signalRefs,
+            evidenceHash: item.evidenceHash ?? null,
+            status: item.status,
+          },
+        })
+        .returning();
+      candidateIds.set(item.candidateKey, row!.id);
+    }
+
+    for (const item of parsed.insights) {
+      const [row] = await db
+        .insert(insights)
+        .values({
+          repoId,
+          runId: parsed.runId,
+          candidateId: candidateIds.get(item.candidateKey) ?? null,
+          evidenceId: evidenceIds.get(item.evidenceHash) ?? null,
+          headline: item.headline,
+          narrative: item.narrative,
+          severity: item.severity,
+          category: item.category,
+          entityIds: item.entityIds,
+          fromSha: item.fromSha,
+          toSha: item.toSha,
+          evidenceHash: item.evidenceHash,
+          model: item.model ?? null,
+          provider: item.provider ?? null,
+          promptHash: item.promptHash ?? null,
+          confidence: item.confidence,
+          status: item.status,
+          suggestedActions: item.suggestedActions,
+          citedSignals: item.citedSignals,
+        })
+        .onConflictDoUpdate({
+          target: [insights.repoId, insights.runId, insights.evidenceHash],
+          set: {
+            candidateId: candidateIds.get(item.candidateKey) ?? null,
+            evidenceId: evidenceIds.get(item.evidenceHash) ?? null,
+            headline: item.headline,
+            narrative: item.narrative,
+            severity: item.severity,
+            category: item.category,
+            entityIds: item.entityIds,
+            fromSha: item.fromSha,
+            toSha: item.toSha,
+            model: item.model ?? null,
+            provider: item.provider ?? null,
+            promptHash: item.promptHash ?? null,
+            confidence: item.confidence,
+            status: item.status,
+            suggestedActions: item.suggestedActions,
+            citedSignals: item.citedSignals,
+          },
+        })
+        .returning();
+      console.info('insight.created', { repoId, runId: parsed.runId, insightId: row!.id });
+    }
+
+    return {
+      ok: true,
+      evidence: parsed.evidence.length,
+      candidates: parsed.candidates.length,
+      insights: parsed.insights.length,
+      providerState: parsed.providerState,
+    };
   }
 
   private async requireRunRepo(runId: string) {

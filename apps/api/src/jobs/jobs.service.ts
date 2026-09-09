@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import type {
+  AiGenerateJobPayload,
   CloneJobPayload,
   EnumerateSampleJobPayload,
   EvolveJobPayload,
@@ -18,6 +19,7 @@ export const PARSE_COMMIT_QUEUE = 'parse_commit';
 export const GRAPH_WRITE_QUEUE = 'graph_write';
 export const METRICS_WRITE_QUEUE = 'metrics_write';
 export const EVOLVE_QUEUE = 'evolve';
+export const AI_QUEUE = 'ai';
 
 @Injectable()
 export class JobsService implements OnModuleDestroy {
@@ -28,6 +30,7 @@ export class JobsService implements OnModuleDestroy {
   private readonly graphQueue: Queue<GraphWriteJobPayload>;
   private readonly metricsQueue: Queue<MetricsWriteJobPayload>;
   private readonly evolveQueue: Queue<EvolveJobPayload>;
+  private readonly aiQueue: Queue<AiGenerateJobPayload>;
 
   constructor() {
     const connection = { url: env.REDIS_URL };
@@ -56,6 +59,10 @@ export class JobsService implements OnModuleDestroy {
       defaultJobOptions: defaults,
     });
     this.evolveQueue = new Queue(EVOLVE_QUEUE, {
+      connection,
+      defaultJobOptions: defaults,
+    });
+    this.aiQueue = new Queue(AI_QUEUE, {
       connection,
       defaultJobOptions: defaults,
     });
@@ -93,6 +100,10 @@ export class JobsService implements OnModuleDestroy {
     await this.evolveQueue.add('evolve', payload, { jobId: payload.jobId });
   }
 
+  async enqueueAi(payload: AiGenerateJobPayload) {
+    await this.aiQueue.add('ai', payload, { jobId: payload.jobId });
+  }
+
   async onModuleDestroy() {
     await Promise.all([
       this.cloneQueue.close(),
@@ -102,6 +113,7 @@ export class JobsService implements OnModuleDestroy {
       this.graphQueue.close(),
       this.metricsQueue.close(),
       this.evolveQueue.close(),
+      this.aiQueue.close(),
     ]);
   }
 }
