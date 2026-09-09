@@ -19,6 +19,7 @@ export function useRepoUrlState() {
       metric: searchParams.get('metric') ?? 'fan_in',
       depth: Number(searchParams.get('depth') ?? '1'),
       severity: searchParams.get('severity') ?? '',
+      category: searchParams.get('category') ?? '',
       eventType: searchParams.get('type') ?? '',
     }),
     [searchParams],

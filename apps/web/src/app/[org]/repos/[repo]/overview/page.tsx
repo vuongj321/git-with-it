@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   api,
   type EvolutionEvent,
+  type Insight,
   type MetricsSummary,
   type Org,
   type Repo,
@@ -85,6 +86,14 @@ export default function OverviewPage() {
       api<SampleCommit[]>(
         `/v1/repos/${params.repo}/commits?orgId=${orgQuery.data!.id}&sampled=true`,
       ),
+  });
+
+  const insightsQuery = useQuery({
+    queryKey: ['insights-overview', params.repo, orgQuery.data?.id],
+    enabled: Boolean(orgQuery.data?.id),
+    queryFn: () =>
+      api<Insight[]>(`/v1/repos/${params.repo}/insights?orgId=${orgQuery.data!.id}&limit=3`),
+    refetchInterval: runQuery.data?.status === 'ai_generating' ? 3_000 : false,
   });
 
   async function reanalyze() {
@@ -185,6 +194,33 @@ export default function OverviewPage() {
                   <span className="muted mono">
                     {e.fromSha.slice(0, 7)}→{e.toSha.slice(0, 7)}
                   </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2 className="section-title">Top insights</h2>
+        <p className="muted">Based on measured signals from metrics, diffs, and evolution events.</p>
+        {(insightsQuery.data ?? []).length === 0 ? (
+          <p className="muted" style={{ marginTop: '1rem' }}>
+            {run?.status === 'ai_generating'
+              ? 'Insights are being generated for this run.'
+              : 'No published insights yet. Configure an AI provider or regenerate insights after analysis.'}
+          </p>
+        ) : (
+          <ul className="event-list" style={{ marginTop: '1rem' }}>
+            {(insightsQuery.data ?? []).map((insight) => (
+              <li key={insight.id}>
+                <Link
+                  href={`${base}/insights?severity=${insight.severity}`}
+                  className="event-row"
+                >
+                  <span className={`sev sev-${insight.severity}`}>{insight.severity}</span>
+                  <span>{insight.headline}</span>
+                  <span className="muted mono">{insight.category}</span>
                 </Link>
               </li>
             ))}

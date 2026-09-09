@@ -11,6 +11,7 @@ import {
   type GraphDiffPayload,
   type GraphSlice,
   type HeatmapResponse,
+  type Insight,
   type Org,
   type Repo,
 } from '@/lib/api';
@@ -76,6 +77,15 @@ export function ArchitectureGraph() {
     queryFn: () =>
       api<GraphDiffPayload>(
         `/v1/repos/${params.repo}/graph/diff?orgId=${orgQuery.data!.id}&from=${from}&to=${to}`,
+      ),
+  });
+
+  const selectedInsightsQuery = useQuery({
+    queryKey: ['entity-insights', params.repo, selected?.id, orgQuery.data?.id],
+    enabled: Boolean(orgQuery.data?.id && selected?.id),
+    queryFn: () =>
+      api<Insight[]>(
+        `/v1/repos/${params.repo}/entities/${selected!.id}/insights?orgId=${orgQuery.data!.id}&limit=5`,
       ),
   });
 
@@ -288,6 +298,23 @@ export function ArchitectureGraph() {
             <p className="muted mono" style={{ fontSize: '0.8rem' }}>
               {selected.id}
             </p>
+            <div className="label" style={{ marginTop: '1rem' }}>
+              Related insights
+            </div>
+            {selectedInsightsQuery.isLoading ? (
+              <p className="muted">Loading insights…</p>
+            ) : (selectedInsightsQuery.data ?? []).length === 0 ? (
+              <p className="muted">No insights mention this entity yet.</p>
+            ) : (
+              <ul className="event-list" style={{ marginTop: '0.5rem' }}>
+                {(selectedInsightsQuery.data ?? []).map((insight) => (
+                  <li key={insight.id}>
+                    <span className={`sev sev-${insight.severity}`}>{insight.severity}</span>{' '}
+                    {insight.headline}
+                  </li>
+                ))}
+              </ul>
+            )}
             <button
               type="button"
               className="btn btn-ghost"

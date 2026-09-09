@@ -159,3 +159,25 @@ export type GraphDiffPayload = {
   highlightIds?: string[];
   highlight_subgraph?: string[];
 };
+
+export type Insight = {
+  id: string;
+  repoId: string;
+  runId: string | null;
+  headline: string;
+  narrative: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  category: 'debt' | 'drift' | 'risk' | 'refactor' | 'hotspot';
+  entityIds: string[];
+  fromSha: string;
+  toSha: string;
+  evidenceHash: string;
+  model: string | null;
+  provider: string | null;
+  promptHash: string | null;
+  confidence: number;
+  status: 'published' | 'failed_validation' | 'skipped_no_provider';
+  suggestedActions: string[];
+  citedSignals: string[];
+  createdAt: string;
+};
