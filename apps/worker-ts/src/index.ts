@@ -1,5 +1,6 @@
 import { Worker } from 'bullmq';
 import {
+  AiGenerateJobPayloadSchema,
   CloneJobPayloadSchema,
   EnumerateSampleJobPayloadSchema,
   EvolveJobPayloadSchema,
@@ -8,6 +9,7 @@ import {
   ParseCommitJobPayloadSchema,
   ParseJobPayloadSchema,
 } from '@gwi/shared-types';
+import { processAiGenerateJob } from './ai';
 import { processCloneJob } from './clone';
 import { processEnumerateSampleJob } from './enumerate';
 import { env } from './env';
@@ -84,6 +86,15 @@ const evolveWorker = new Worker(
   { connection, concurrency: 1 },
 );
 
+const aiWorker = new Worker(
+  'ai',
+  async (job) => {
+    const payload = AiGenerateJobPayloadSchema.parse(job.data);
+    await processAiGenerateJob(payload);
+  },
+  { connection, concurrency: 1 },
+);
+
 for (const [name, worker] of [
   ['clone', cloneWorker],
   ['enumerate_sample', enumerateWorker],
@@ -92,6 +103,7 @@ for (const [name, worker] of [
   ['graph_write', graphWorker],
   ['metrics_write', metricsWorker],
   ['evolve', evolveWorker],
+  ['ai', aiWorker],
 ] as const) {
   worker.on('ready', () => logger.info({ queue: name }, 'worker ready'));
   worker.on('completed', (job) =>
@@ -112,6 +124,7 @@ async function shutdown() {
     graphWorker.close(),
     metricsWorker.close(),
     evolveWorker.close(),
+    aiWorker.close(),
   ]);
   process.exit(0);
 }

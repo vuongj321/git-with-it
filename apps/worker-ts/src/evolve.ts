@@ -82,13 +82,21 @@ export async function processEvolveJob(payload: EvolveJobPayload) {
       });
     }
 
+    await apiJson(`/v1/internal/runs/${payload.runId}/enqueue-ai`, {
+      method: 'POST',
+      body: {
+        sampleShas: payload.sampleShas,
+        sampleConfig: payload.sampleConfig,
+      },
+    });
+
     await patchRun(payload.runId, {
-      status: 'evolution_ready',
+      status: 'ai_generating',
       jobStatus: 'completed',
       progress: 100,
       error: null,
     });
-    log.info({ pairs: Math.max(0, shas.length - 1) }, 'evolution_ready');
+    log.info({ pairs: Math.max(0, shas.length - 1) }, 'evolve done; ai enqueued');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ err: message }, 'evolve failed');
