@@ -13,8 +13,11 @@ import {
   AnalysisRunStatus,
   entityId,
   EntityKind,
+  EvolutionEventType,
+  EvolutionSeverity,
   JobStatus,
   RepositoryStatus,
+  SampleConfigSchema,
   type EntityKindForId,
 } from '@gwi/shared-types';
 import { eq } from 'drizzle-orm';
@@ -23,12 +26,21 @@ import { JwtOrSessionAuthGuard } from '../auth/jwt-or-session.guard';
 import { db } from '../db/client';
 import {
   analysisRuns,
+  commitSamples,
+  commits,
   entities,
   entityAppearances,
+  entityRenames,
+  evolutionEvents,
+  graphDeltas,
   jobs,
   repositories,
 } from '../db/schema';
-import { writeGraphSnapshot } from '../graph/neo4j';
+import {
+  applyTemporalEdgeDelta,
+  upsertTemporalNodes,
+  writeTemporalSnapshot,
+} from '../graph/neo4j';
 import { JobsService } from '../jobs/jobs.service';
 
 const UpdateRunBody = z.object({
@@ -38,6 +50,10 @@ const UpdateRunBody = z.object({
   lastSyncedSha: z.string().nullable().optional(),
   commitSha: z.string().nullable().optional(),
   analyzerVersion: z.string().nullable().optional(),
+  sampleShas: z.array(z.string()).optional(),
+  commitsDone: z.number().int().optional(),
+  commitsTotal: z.number().int().optional(),
+  sampleConfig: z.record(z.unknown()).optional(),
   jobStatus: JobStatus.optional(),
   progress: z.number().int().min(0).max(100).optional(),
   repoStatus: RepositoryStatus.optional(),
@@ -47,6 +63,25 @@ const EnqueueParseBody = z.object({
   commitSha: z.string().min(7),
   cloneUri: z.string().min(1),
   analyzerVersion: z.string().min(1).default(ANALYZER_VERSION),
+});
+
+const EnqueueEnumerateBody = z.object({
+  tipSha: z.string().min(7),
+  cloneUri: z.string().min(1),
+  analyzerVersion: z.string().min(1).default(ANALYZER_VERSION),
+  sampleConfig: SampleConfigSchema.partial().optional(),
+});
+
+const EnqueueParseCommitsBody = z.object({
+  cloneUri: z.string().min(1),
+  analyzerVersion: z.string().min(1).default(ANALYZER_VERSION),
+  sampleShas: z.array(z.string().min(7)).min(1),
+  sampleConfig: SampleConfigSchema.partial().optional(),
+});
+
+const EnqueueEvolveBody = z.object({
+  sampleShas: z.array(z.string().min(7)).min(1),
+  sampleConfig: SampleConfigSchema.partial().optional(),
 });
 
 const EnqueueGraphBody = z.object({
@@ -97,6 +132,106 @@ const GraphSnapshotBody = z.object({
   ),
 });
 
+const TemporalSnapshotBody = GraphSnapshotBody.extend({
+  topoIndex: z.number().int().min(0),
+  replaceRepo: z.boolean().optional().default(false),
+});
+
+const TemporalBootstrapBody = TemporalSnapshotBody;
+
+const GraphDeltaBody = z.object({
+  runId: z.string().uuid().optional(),
+  fromSha: z.string().min(7),
+  toSha: z.string().min(7),
+  fromTopo: z.number().int(),
+  toTopo: z.number().int(),
+  artifactUri: z.string().min(1),
+  edgesAdded: z.array(z.object({ from: z.string(), to: z.string(), rel: z.string() })),
+  edgesRemoved: z.array(z.object({ from: z.string(), to: z.string(), rel: z.string() })),
+  nodes: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.string(),
+      fqn: z.string(),
+      name: z.string(),
+      path: z.string().nullable().optional(),
+      language: z.string().nullable().optional(),
+      package: z.string().nullable().optional(),
+    }),
+  ),
+  analyzerVersion: z.string().min(1),
+  nodesAdded: z.number().int().default(0),
+  nodesRemoved: z.number().int().default(0),
+  edgesAddedCount: z.number().int().default(0),
+  edgesRemovedCount: z.number().int().default(0),
+  renames: z
+    .array(
+      z.object({
+        fromPath: z.string(),
+        toPath: z.string(),
+        confidence: z.number().optional(),
+        source: z.string().optional(),
+      }),
+    )
+    .optional(),
+});
+
+const CheckpointBody = z.object({
+  runId: z.string().uuid().optional(),
+  sha: z.string().min(7),
+  topoIndex: z.number().int(),
+  artifactUri: z.string().min(1),
+});
+
+const CommitsUpsertBody = z.object({
+  runId: z.string().uuid(),
+  commits: z.array(
+    z.object({
+      sha: z.string().min(7),
+      parentShas: z.array(z.string()),
+      authoredAt: z.string().nullable(),
+      message: z.string().nullable().optional(),
+    }),
+  ),
+  samples: z.array(
+    z.object({
+      sha: z.string().min(7),
+      topoIndex: z.number().int(),
+      reason: z.string(),
+    }),
+  ),
+  sampleConfig: z.record(z.unknown()).optional(),
+});
+
+const RenamesBody = z.object({
+  fromSha: z.string().min(7).nullable(),
+  toSha: z.string().min(7),
+  renames: z.array(
+    z.object({
+      fromPath: z.string(),
+      toPath: z.string(),
+      confidence: z.number().default(1),
+      source: z.string().default('git_rename'),
+    }),
+  ),
+});
+
+const EvolutionEventsBody = z.object({
+  runId: z.string().uuid().optional(),
+  fromSha: z.string().min(7),
+  toSha: z.string().min(7),
+  authoredAt: z.string().nullable().optional(),
+  events: z.array(
+    z.object({
+      type: EvolutionEventType,
+      severity: EvolutionSeverity,
+      title: z.string(),
+      payload: z.record(z.unknown()).default({}),
+      entityIds: z.array(z.string()).default([]),
+    }),
+  ),
+});
+
 @ApiTags('internal')
 @ApiBearerAuth()
 @Controller('v1/internal')
@@ -117,11 +252,17 @@ export class InternalController {
     if (parsed.analyzerVersion !== undefined) {
       runPatch.analyzerVersion = parsed.analyzerVersion;
     }
+    if (parsed.sampleShas !== undefined) runPatch.sampleShas = parsed.sampleShas;
+    if (parsed.commitsDone !== undefined) runPatch.commitsDone = parsed.commitsDone;
+    if (parsed.commitsTotal !== undefined) runPatch.commitsTotal = parsed.commitsTotal;
+    if (parsed.sampleConfig !== undefined) runPatch.sampleConfig = parsed.sampleConfig;
     if (
       parsed.status === 'cloning' ||
       parsed.status === 'uploading' ||
+      parsed.status === 'enumerating' ||
       parsed.status === 'parsing' ||
-      parsed.status === 'graph_writing'
+      parsed.status === 'graph_writing' ||
+      parsed.status === 'evolving'
     ) {
       runPatch.startedAt = now;
       runPatch.finishedAt = null;
@@ -129,9 +270,12 @@ export class InternalController {
     if (
       parsed.status === 'ready' ||
       parsed.status === 'graph_ready' ||
+      parsed.status === 'evolution_ready' ||
       parsed.status === 'failed'
     ) {
-      runPatch.finishedAt = now;
+      if (parsed.status === 'evolution_ready' || parsed.status === 'failed') {
+        runPatch.finishedAt = now;
+      }
     }
 
     const [run] = await db
@@ -149,7 +293,11 @@ export class InternalController {
     if (parsed.lastSyncedSha !== undefined) repoPatch.lastSyncedSha = parsed.lastSyncedSha;
     if (parsed.repoStatus) repoPatch.status = parsed.repoStatus;
     if (parsed.error !== undefined) repoPatch.lastError = parsed.error;
-    if (parsed.status === 'ready' || parsed.status === 'graph_ready') {
+    if (
+      parsed.status === 'ready' ||
+      parsed.status === 'graph_ready' ||
+      parsed.status === 'evolution_ready'
+    ) {
       repoPatch.lastError = null;
     }
 
@@ -166,21 +314,52 @@ export class InternalController {
     return { ok: true };
   }
 
+  @Post('runs/:runId/enqueue-enumerate')
+  async enqueueEnumerate(@Param('runId') runId: string, @Body() body: unknown) {
+    const parsed = EnqueueEnumerateBody.parse(body);
+    const { run, repo } = await this.requireRunRepo(runId);
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        type: 'enumerate_sample',
+        status: 'queued',
+        orgId: repo.orgId,
+        repoId: repo.id,
+        runId: run.id,
+        progress: 0,
+        payload: { tipSha: parsed.tipSha, cloneUri: parsed.cloneUri },
+      })
+      .returning();
+
+    await db
+      .update(analysisRuns)
+      .set({
+        status: 'enumerating',
+        commitSha: parsed.tipSha,
+        analyzerVersion: parsed.analyzerVersion,
+        finishedAt: null,
+      })
+      .where(eq(analysisRuns.id, runId));
+
+    await this.jobsService.enqueueEnumerate({
+      jobId: job!.id,
+      runId: run.id,
+      repoId: repo.id,
+      orgId: repo.orgId,
+      tipSha: parsed.tipSha,
+      cloneUri: parsed.cloneUri,
+      analyzerVersion: parsed.analyzerVersion,
+      sampleConfig: parsed.sampleConfig,
+    });
+
+    return { ok: true, jobId: job!.id };
+  }
+
   @Post('runs/:runId/enqueue-parse')
   async enqueueParse(@Param('runId') runId: string, @Body() body: unknown) {
     const parsed = EnqueueParseBody.parse(body);
-    const [run] = await db
-      .select()
-      .from(analysisRuns)
-      .where(eq(analysisRuns.id, runId))
-      .limit(1);
-    if (!run) throw new NotFoundException('Run not found');
-    const [repo] = await db
-      .select()
-      .from(repositories)
-      .where(eq(repositories.id, run.repoId))
-      .limit(1);
-    if (!repo) throw new NotFoundException('Repository not found');
+    const { run, repo } = await this.requireRunRepo(runId);
 
     const [job] = await db
       .insert(jobs)
@@ -218,21 +397,83 @@ export class InternalController {
     return { ok: true, jobId: job!.id };
   }
 
+  @Post('runs/:runId/enqueue-parse-commits')
+  async enqueueParseCommits(@Param('runId') runId: string, @Body() body: unknown) {
+    const parsed = EnqueueParseCommitsBody.parse(body);
+    const { run, repo } = await this.requireRunRepo(runId);
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        type: 'parse_commit',
+        status: 'queued',
+        orgId: repo.orgId,
+        repoId: repo.id,
+        runId: run.id,
+        progress: 0,
+        payload: { sampleShas: parsed.sampleShas },
+      })
+      .returning();
+
+    await db
+      .update(analysisRuns)
+      .set({
+        status: 'parsing',
+        sampleShas: parsed.sampleShas,
+        commitsTotal: parsed.sampleShas.length,
+        commitsDone: 0,
+        finishedAt: null,
+      })
+      .where(eq(analysisRuns.id, runId));
+
+    await this.jobsService.enqueueParseCommit({
+      jobId: job!.id,
+      runId: run.id,
+      repoId: repo.id,
+      orgId: repo.orgId,
+      cloneUri: parsed.cloneUri,
+      analyzerVersion: parsed.analyzerVersion,
+      sampleShas: parsed.sampleShas,
+      sampleConfig: parsed.sampleConfig,
+    });
+
+    return { ok: true, jobId: job!.id };
+  }
+
+  @Post('runs/:runId/enqueue-evolve')
+  async enqueueEvolve(@Param('runId') runId: string, @Body() body: unknown) {
+    const parsed = EnqueueEvolveBody.parse(body);
+    const { run, repo } = await this.requireRunRepo(runId);
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        type: 'evolve',
+        status: 'queued',
+        orgId: repo.orgId,
+        repoId: repo.id,
+        runId: run.id,
+        progress: 0,
+        payload: { sampleShas: parsed.sampleShas },
+      })
+      .returning();
+
+    await this.jobsService.enqueueEvolve({
+      jobId: job!.id,
+      runId: run.id,
+      repoId: repo.id,
+      orgId: repo.orgId,
+      sampleShas: parsed.sampleShas,
+      sampleConfig: parsed.sampleConfig,
+    });
+
+    return { ok: true, jobId: job!.id };
+  }
+
   @Post('runs/:runId/enqueue-graph-write')
   async enqueueGraphWrite(@Param('runId') runId: string, @Body() body: unknown) {
     const parsed = EnqueueGraphBody.parse(body);
-    const [run] = await db
-      .select()
-      .from(analysisRuns)
-      .where(eq(analysisRuns.id, runId))
-      .limit(1);
-    if (!run) throw new NotFoundException('Run not found');
-    const [repo] = await db
-      .select()
-      .from(repositories)
-      .where(eq(repositories.id, run.repoId))
-      .limit(1);
-    if (!repo) throw new NotFoundException('Repository not found');
+    const { run, repo } = await this.requireRunRepo(runId);
 
     const [job] = await db
       .insert(jobs)
@@ -264,15 +505,71 @@ export class InternalController {
     return { ok: true, jobId: job!.id };
   }
 
+  @Post('repos/:repoId/commits/upsert')
+  async upsertCommits(@Param('repoId') repoId: string, @Body() body: unknown) {
+    const parsed = CommitsUpsertBody.parse(body);
+    await this.requireRepo(repoId);
+
+    // Map sha → topo from samples for persistence on commits
+    const topoBySha = new Map(parsed.samples.map((s) => [s.sha, s.topoIndex]));
+
+    for (const c of parsed.commits) {
+      await db
+        .insert(commits)
+        .values({
+          repoId,
+          sha: c.sha,
+          parentShas: c.parentShas,
+          authoredAt: c.authoredAt ? new Date(c.authoredAt) : null,
+          message: c.message ?? null,
+          topoIndex: topoBySha.get(c.sha) ?? null,
+        })
+        .onConflictDoUpdate({
+          target: [commits.repoId, commits.sha],
+          set: {
+            parentShas: c.parentShas,
+            authoredAt: c.authoredAt ? new Date(c.authoredAt) : null,
+            message: c.message ?? null,
+            topoIndex: topoBySha.get(c.sha) ?? null,
+          },
+        });
+    }
+
+    for (const s of parsed.samples) {
+      await db
+        .insert(commitSamples)
+        .values({
+          repoId,
+          runId: parsed.runId,
+          sha: s.sha,
+          topoIndex: s.topoIndex,
+          reason: s.reason,
+        })
+        .onConflictDoUpdate({
+          target: [commitSamples.runId, commitSamples.sha],
+          set: { topoIndex: s.topoIndex, reason: s.reason },
+        });
+    }
+
+    await db
+      .update(analysisRuns)
+      .set({
+        sampleShas: parsed.samples
+          .slice()
+          .sort((a, b) => a.topoIndex - b.topoIndex)
+          .map((s) => s.sha),
+        commitsTotal: parsed.samples.length,
+        sampleConfig: parsed.sampleConfig ?? {},
+      })
+      .where(eq(analysisRuns.id, parsed.runId));
+
+    return { ok: true, commits: parsed.commits.length, samples: parsed.samples.length };
+  }
+
   @Post('repos/:repoId/entities/upsert')
   async upsertEntities(@Param('repoId') repoId: string, @Body() body: unknown) {
     const parsed = UpsertEntitiesBody.parse(body);
-    const [repo] = await db
-      .select()
-      .from(repositories)
-      .where(eq(repositories.id, repoId))
-      .limit(1);
-    if (!repo) throw new NotFoundException('Repository not found');
+    await this.requireRepo(repoId);
 
     let upserted = 0;
     for (const e of parsed.entities) {
@@ -339,24 +636,223 @@ export class InternalController {
     return { ok: true, upserted };
   }
 
+  @Post('repos/:repoId/entities/renames')
+  async recordRenames(@Param('repoId') repoId: string, @Body() body: unknown) {
+    const parsed = RenamesBody.parse(body);
+    await this.requireRepo(repoId);
+
+    for (const r of parsed.renames) {
+      const fromFqn = r.fromPath;
+      const toFqn = r.toPath;
+      const fromId = entityId(repoId, 'file', fromFqn);
+      const [existing] = await db
+        .select()
+        .from(entities)
+        .where(eq(entities.id, fromId))
+        .limit(1);
+      const entityRef = existing?.id ?? entityId(repoId, 'file', toFqn);
+      if (existing) {
+        await db
+          .update(entities)
+          .set({
+            renameOf: existing.renameOf ?? existing.id,
+            metadata: { ...(existing.metadata ?? {}), priorFqn: fromFqn, currentPath: r.toPath },
+            lastSeenSha: parsed.toSha,
+            updatedAt: new Date(),
+          })
+          .where(eq(entities.id, existing.id));
+      }
+      await db.insert(entityRenames).values({
+        repoId,
+        entityId: entityRef,
+        fromSha: parsed.fromSha ?? parsed.toSha,
+        toSha: parsed.toSha,
+        fromFqn,
+        toFqn,
+        fromPath: r.fromPath,
+        toPath: r.toPath,
+        confidence: r.confidence,
+        source: r.source,
+      });
+    }
+
+    return { ok: true, count: parsed.renames.length };
+  }
+
   @Post('repos/:repoId/graph/snapshot')
   async writeSnapshot(@Param('repoId') repoId: string, @Body() body: unknown) {
     const parsed = GraphSnapshotBody.parse(body);
+    await this.requireRepo(repoId);
+
+    await writeTemporalSnapshot({
+      repoId,
+      sha: parsed.sha,
+      topoIndex: 0,
+      analyzerVersion: parsed.analyzerVersion,
+      nodes: parsed.nodes,
+      edges: parsed.edges,
+      replaceRepo: true,
+    });
+
+    return { ok: true, nodes: parsed.nodes.length, edges: parsed.edges.length };
+  }
+
+  @Post('repos/:repoId/graph/temporal-snapshot')
+  async temporalSnapshot(@Param('repoId') repoId: string, @Body() body: unknown) {
+    const parsed = TemporalSnapshotBody.parse(body);
+    await this.requireRepo(repoId);
+    await writeTemporalSnapshot({
+      repoId,
+      sha: parsed.sha,
+      topoIndex: parsed.topoIndex,
+      analyzerVersion: parsed.analyzerVersion,
+      nodes: parsed.nodes,
+      edges: parsed.edges,
+      replaceRepo: parsed.replaceRepo,
+    });
+    return { ok: true };
+  }
+
+  @Post('repos/:repoId/graph/temporal-bootstrap')
+  async temporalBootstrap(@Param('repoId') repoId: string, @Body() body: unknown) {
+    const parsed = TemporalBootstrapBody.parse(body);
+    await this.requireRepo(repoId);
+    await upsertTemporalNodes({
+      repoId,
+      analyzerVersion: parsed.analyzerVersion,
+      nodes: parsed.nodes,
+    });
+    // Only add edges that aren't already open — MVP: apply as added at this topo
+    await applyTemporalEdgeDelta({
+      repoId,
+      sha: parsed.sha,
+      topoIndex: parsed.topoIndex,
+      analyzerVersion: parsed.analyzerVersion,
+      edgesAdded: parsed.edges,
+      edgesRemoved: [],
+    });
+    return { ok: true };
+  }
+
+  @Post('repos/:repoId/graph/delta')
+  async graphDelta(@Param('repoId') repoId: string, @Body() body: unknown) {
+    const parsed = GraphDeltaBody.parse(body);
+    await this.requireRepo(repoId);
+
+    await upsertTemporalNodes({
+      repoId,
+      analyzerVersion: parsed.analyzerVersion,
+      nodes: parsed.nodes,
+    });
+    await applyTemporalEdgeDelta({
+      repoId,
+      sha: parsed.toSha,
+      topoIndex: parsed.toTopo,
+      analyzerVersion: parsed.analyzerVersion,
+      edgesAdded: parsed.edgesAdded,
+      edgesRemoved: parsed.edgesRemoved,
+    });
+
+    await db
+      .insert(graphDeltas)
+      .values({
+        repoId,
+        runId: parsed.runId ?? null,
+        fromSha: parsed.fromSha,
+        toSha: parsed.toSha,
+        fromTopo: parsed.fromTopo,
+        toTopo: parsed.toTopo,
+        artifactUri: parsed.artifactUri,
+        nodesAdded: parsed.nodesAdded,
+        nodesRemoved: parsed.nodesRemoved,
+        edgesAdded: parsed.edgesAddedCount,
+        edgesRemoved: parsed.edgesRemovedCount,
+        isCheckpoint: false,
+      })
+      .onConflictDoUpdate({
+        target: [graphDeltas.repoId, graphDeltas.fromSha, graphDeltas.toSha],
+        set: {
+          artifactUri: parsed.artifactUri,
+          nodesAdded: parsed.nodesAdded,
+          nodesRemoved: parsed.nodesRemoved,
+          edgesAdded: parsed.edgesAddedCount,
+          edgesRemoved: parsed.edgesRemovedCount,
+        },
+      });
+
+    return { ok: true };
+  }
+
+  @Post('repos/:repoId/graph/checkpoint')
+  async checkpoint(@Param('repoId') repoId: string, @Body() body: unknown) {
+    const parsed = CheckpointBody.parse(body);
+    await this.requireRepo(repoId);
+    await db.insert(graphDeltas).values({
+      repoId,
+      runId: parsed.runId ?? null,
+      fromSha: parsed.sha,
+      toSha: parsed.sha,
+      fromTopo: parsed.topoIndex,
+      toTopo: parsed.topoIndex,
+      artifactUri: parsed.artifactUri,
+      isCheckpoint: true,
+    });
+    return { ok: true };
+  }
+
+  @Post('repos/:repoId/evolution-events')
+  async insertEvents(@Param('repoId') repoId: string, @Body() body: unknown) {
+    const parsed = EvolutionEventsBody.parse(body);
+    await this.requireRepo(repoId);
+
+    let authoredAt: Date | null = parsed.authoredAt
+      ? new Date(parsed.authoredAt)
+      : null;
+    if (!authoredAt) {
+      const [c] = await db
+        .select()
+        .from(commits)
+        .where(eq(commits.sha, parsed.toSha))
+        .limit(1);
+      authoredAt = c?.authoredAt ?? null;
+    }
+
+    for (const e of parsed.events) {
+      await db.insert(evolutionEvents).values({
+        repoId,
+        runId: parsed.runId ?? null,
+        fromSha: parsed.fromSha,
+        toSha: parsed.toSha,
+        authoredAt,
+        type: e.type,
+        severity: e.severity,
+        title: e.title,
+        payload: e.payload,
+        entityIds: e.entityIds,
+      });
+    }
+
+    return { ok: true, count: parsed.events.length };
+  }
+
+  private async requireRunRepo(runId: string) {
+    const [run] = await db
+      .select()
+      .from(analysisRuns)
+      .where(eq(analysisRuns.id, runId))
+      .limit(1);
+    if (!run) throw new NotFoundException('Run not found');
+    const repo = await this.requireRepo(run.repoId);
+    return { run, repo };
+  }
+
+  private async requireRepo(repoId: string) {
     const [repo] = await db
       .select()
       .from(repositories)
       .where(eq(repositories.id, repoId))
       .limit(1);
     if (!repo) throw new NotFoundException('Repository not found');
-
-    await writeGraphSnapshot({
-      repoId,
-      sha: parsed.sha,
-      analyzerVersion: parsed.analyzerVersion,
-      nodes: parsed.nodes,
-      edges: parsed.edges,
-    });
-
-    return { ok: true, nodes: parsed.nodes.length, edges: parsed.edges.length };
+    return repo;
   }
 }

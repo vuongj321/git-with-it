@@ -3,6 +3,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   Param,
   Post,
@@ -11,20 +13,36 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CreateRepoBodySchema, isLikelyGitRemoteUrl } from '@gwi/shared-types';
-import { and, desc, eq, ilike, or } from 'drizzle-orm';
+import {
+  CreateRepoBodySchema,
+  SampleConfigSchema,
+  diffGraphs,
+  isLikelyGitRemoteUrl,
+  type GraphSnapshot,
+} from '@gwi/shared-types';
+import { and, asc, desc, eq, ilike, or } from 'drizzle-orm';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { JwtOrSessionAuthGuard } from '../auth/jwt-or-session.guard';
 import { OrgMembershipGuard } from '../auth/org-membership.guard';
 import { OrgIdParam } from '../auth/org.decorator';
 import { db } from '../db/client';
-import { analysisRuns, entities, jobs, repositories } from '../db/schema';
+import {
+  analysisRuns,
+  commitSamples,
+  commits,
+  entities,
+  evolutionEvents,
+  graphDeltas,
+  jobs,
+  repositories,
+} from '../db/schema';
 import { queryGraphSlice } from '../graph/neo4j';
 import { JobsService } from '../jobs/jobs.service';
 
 const AnalyzeBody = z.object({
   defaultBranch: z.string().min(1).optional(),
+  sampleConfig: SampleConfigSchema.partial().optional(),
 });
 
 const GraphQuery = z.object({
@@ -36,6 +54,31 @@ const GraphQuery = z.object({
 const EntitiesQuery = z.object({
   q: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+const CommitsQuery = z.object({
+  sampled: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
+  runId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(200),
+});
+
+const DiffQuery = z.object({
+  from: z.string().min(7),
+  to: z.string().min(7),
+});
+
+const TimelineQuery = z.object({
+  from: z.string().min(7).optional(),
+  to: z.string().min(7).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+
+const CompareBody = z.object({
+  from: z.string().min(7),
+  to: z.string().min(7),
 });
 
 @ApiTags('repos')
@@ -82,6 +125,73 @@ export class ReposController {
     return serializeRepo(repo);
   }
 
+  @Get(':id/commits')
+  async listCommits(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = CommitsQuery.parse(query);
+
+    if (parsed.sampled) {
+      let runId = parsed.runId;
+      if (!runId) {
+        const [latest] = await db
+          .select()
+          .from(analysisRuns)
+          .where(eq(analysisRuns.repoId, repo.id))
+          .orderBy(desc(analysisRuns.createdAt))
+          .limit(1);
+        runId = latest?.id;
+      }
+      if (!runId) return [];
+      const rows = await db
+        .select({
+          sha: commitSamples.sha,
+          topoIndex: commitSamples.topoIndex,
+          reason: commitSamples.reason,
+          authoredAt: commits.authoredAt,
+          message: commits.message,
+          parentShas: commits.parentShas,
+        })
+        .from(commitSamples)
+        .leftJoin(
+          commits,
+          and(eq(commits.repoId, repo.id), eq(commits.sha, commitSamples.sha)),
+        )
+        .where(
+          and(eq(commitSamples.repoId, repo.id), eq(commitSamples.runId, runId)),
+        )
+        .orderBy(asc(commitSamples.topoIndex))
+        .limit(parsed.limit);
+      return rows.map((r) => ({
+        sha: r.sha,
+        topoIndex: r.topoIndex,
+        reason: r.reason,
+        authoredAt: r.authoredAt?.toISOString() ?? null,
+        message: r.message ?? null,
+        parentShas: r.parentShas ?? [],
+        sampled: true,
+      }));
+    }
+
+    const rows = await db
+      .select()
+      .from(commits)
+      .where(eq(commits.repoId, repo.id))
+      .orderBy(desc(commits.authoredAt))
+      .limit(parsed.limit);
+    return rows.map((c) => ({
+      sha: c.sha,
+      topoIndex: c.topoIndex,
+      authoredAt: c.authoredAt?.toISOString() ?? null,
+      message: c.message,
+      parentShas: c.parentShas,
+      sampled: false,
+    }));
+  }
+
   @Get(':id/graph')
   async graph(
     @Param('id') id: string,
@@ -94,10 +204,18 @@ export class ReposController {
     if (!sha) {
       throw new BadRequestException('sha required (repo has no lastSyncedSha)');
     }
+
+    const [commit] = await db
+      .select()
+      .from(commits)
+      .where(and(eq(commits.repoId, repo.id), eq(commits.sha, sha)))
+      .limit(1);
+
     try {
       return await queryGraphSlice({
         repoId: repo.id,
         sha,
+        topoIndex: commit?.topoIndex ?? null,
         view: parsed.view,
         maxNodes: parsed.limit,
       });
@@ -105,6 +223,117 @@ export class ReposController {
       const message = err instanceof Error ? err.message : String(err);
       throw new BadRequestException(`graph query failed: ${message}`);
     }
+  }
+
+  @Get(':id/graph/diff')
+  async graphDiff(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = DiffQuery.parse(query);
+    await this.assertCompareAllowed(repo.id, parsed.from, parsed.to);
+
+    const fromSnap = await this.loadSnapshotJson(repo.id, parsed.from);
+    const toSnap = await this.loadSnapshotJson(repo.id, parsed.to);
+    const diff = diffGraphs(fromSnap, toSnap);
+    return {
+      ...diff,
+      highlight_subgraph: diff.highlightIds,
+    };
+  }
+
+  @Post(':id/compare')
+  async compare(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Body() body: unknown,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = CompareBody.parse(body);
+    await this.assertCompareAllowed(repo.id, parsed.from, parsed.to);
+    const fromSnap = await this.loadSnapshotJson(repo.id, parsed.from);
+    const toSnap = await this.loadSnapshotJson(repo.id, parsed.to);
+    const diff = diffGraphs(fromSnap, toSnap);
+    return {
+      id: `${parsed.from}_${parsed.to}`,
+      from: parsed.from,
+      to: parsed.to,
+      diff: {
+        ...diff,
+        highlight_subgraph: diff.highlightIds,
+      },
+    };
+  }
+
+  @Get(':id/timeline')
+  async timeline(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = TimelineQuery.parse(query);
+
+    const conditions = [eq(evolutionEvents.repoId, repo.id)];
+    // Optional sha range filter via topo if both provided
+    if (parsed.from && parsed.to) {
+      const [fromC] = await db
+        .select()
+        .from(commits)
+        .where(and(eq(commits.repoId, repo.id), eq(commits.sha, parsed.from)))
+        .limit(1);
+      const [toC] = await db
+        .select()
+        .from(commits)
+        .where(and(eq(commits.repoId, repo.id), eq(commits.sha, parsed.to)))
+        .limit(1);
+      if (fromC?.topoIndex != null && toC?.topoIndex != null) {
+        // Filter events whose to_sha topo is within range — approximate via sha match list
+        void fromC;
+        void toC;
+      }
+      conditions.push(eq(evolutionEvents.fromSha, parsed.from));
+      // soft filter: events between — keep all matching repo and let client filter
+    }
+
+    const rows = await db
+      .select()
+      .from(evolutionEvents)
+      .where(and(...conditions))
+      .orderBy(desc(evolutionEvents.authoredAt), desc(evolutionEvents.createdAt))
+      .limit(parsed.limit);
+
+    let filtered = rows;
+    if (parsed.from || parsed.to) {
+      const topoRows = await db
+        .select()
+        .from(commits)
+        .where(eq(commits.repoId, repo.id));
+      const topo = new Map(topoRows.map((c) => [c.sha, c.topoIndex ?? -1]));
+      const fromIdx = parsed.from ? (topo.get(parsed.from) ?? 0) : 0;
+      const toIdx = parsed.to
+        ? (topo.get(parsed.to) ?? Number.MAX_SAFE_INTEGER)
+        : Number.MAX_SAFE_INTEGER;
+      filtered = rows.filter((e) => {
+        const i = topo.get(e.toSha) ?? -1;
+        return i >= fromIdx && i <= toIdx;
+      });
+    }
+
+    return filtered.map((e) => ({
+      id: e.id,
+      repoId: e.repoId,
+      fromSha: e.fromSha,
+      toSha: e.toSha,
+      authoredAt: e.authoredAt?.toISOString() ?? null,
+      type: e.type,
+      severity: e.severity,
+      title: e.title,
+      payload: e.payload,
+      entityIds: e.entityIds,
+    }));
   }
 
   @Get(':id/entities')
@@ -165,6 +394,7 @@ export class ReposController {
       .values({
         repoId: repo.id,
         status: 'queued',
+        sampleConfig: parsed.data.sampleConfig ?? {},
         triggeredBy:
           req.user!.userId === '00000000-0000-0000-0000-000000000000'
             ? null
@@ -223,6 +453,95 @@ export class ReposController {
     return serializeRun(run);
   }
 
+  private async assertCompareAllowed(repoId: string, from: string, to: string) {
+    const samples = await db
+      .select()
+      .from(commits)
+      .where(eq(commits.repoId, repoId));
+    const topo = new Map(
+      samples
+        .filter((c) => c.topoIndex != null)
+        .map((c) => [c.sha, c.topoIndex as number]),
+    );
+    const fromIdx = topo.get(from);
+    const toIdx = topo.get(to);
+    if (fromIdx == null || toIdx == null) {
+      // Allow if snapshots exist; hop check skipped
+      return;
+    }
+    const hops = Math.abs(toIdx - fromIdx);
+    const maxHops = 200;
+    if (hops > maxHops) {
+      const ckpts = await db
+        .select()
+        .from(graphDeltas)
+        .where(
+          and(eq(graphDeltas.repoId, repoId), eq(graphDeltas.isCheckpoint, true)),
+        );
+      if (ckpts.length === 0) {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.PRECONDITION_FAILED,
+            message: `Compare spans ${hops} samples (>${maxHops}) without checkpoints. Narrow the range or wait for checkpoint artifacts.`,
+          },
+          HttpStatus.PRECONDITION_FAILED,
+        );
+      }
+    }
+  }
+
+  private async loadSnapshotJson(repoId: string, sha: string): Promise<GraphSnapshot> {
+    // Prefer S3 via env — for API we reconstruct from Neo4j slice + empty fallback
+    // Snapshots are also queryable: try reading graph_deltas is not enough.
+    // Use Neo4j materialization at topo, or return empty if missing.
+    const [commit] = await db
+      .select()
+      .from(commits)
+      .where(and(eq(commits.repoId, repoId), eq(commits.sha, sha)))
+      .limit(1);
+    const slice = await queryGraphSlice({
+      repoId,
+      sha,
+      topoIndex: commit?.topoIndex ?? null,
+      view: 'file',
+      maxNodes: 500,
+    });
+    const pkg = await queryGraphSlice({
+      repoId,
+      sha,
+      topoIndex: commit?.topoIndex ?? null,
+      view: 'package',
+      maxNodes: 500,
+    });
+    const nodes = [
+      ...slice.nodes.map((n) => ({
+        id: String(n.id),
+        kind: String(n.kind ?? 'file'),
+        fqn: String(n.fqn ?? n.id),
+        name: String(n.name ?? n.id),
+        path: (n.path as string) ?? null,
+        language: (n.language as string) ?? null,
+        package: (n.package as string) ?? null,
+      })),
+      ...pkg.nodes.map((n) => ({
+        id: String(n.id),
+        kind: String(n.kind ?? 'package'),
+        fqn: String(n.fqn ?? n.id),
+        name: String(n.name ?? n.id),
+        path: (n.path as string) ?? null,
+        language: (n.language as string) ?? null,
+        package: (n.package as string) ?? null,
+      })),
+    ];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const edges = [...slice.edges, ...pkg.edges];
+    return {
+      sha,
+      nodes: [...byId.values()],
+      edges,
+    };
+  }
+
   private async requireRepo(id: string, orgId: string) {
     if (!orgId) throw new BadRequestException('orgId query required');
     const rows = await db
@@ -259,6 +578,9 @@ function serializeRun(run: typeof analysisRuns.$inferSelect) {
     status: run.status,
     analyzerVersion: run.analyzerVersion ?? null,
     commitSha: run.commitSha ?? null,
+    sampleShas: run.sampleShas ?? [],
+    commitsDone: run.commitsDone ?? 0,
+    commitsTotal: run.commitsTotal ?? 0,
     triggeredBy: run.triggeredBy,
     error: run.error,
     createdAt: run.createdAt.toISOString(),
