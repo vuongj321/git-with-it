@@ -1,0 +1,56 @@
+# Placeholder values — wire real images/resources per env.
+global:
+  imagePullSecrets: []
+  env: staging
+
+api:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/example/gwi-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 4000
+  env:
+    ORCHESTRATOR: bullmq
+    SECRET_SCAN_MODE: warn
+
+web:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/example/gwi-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 3000
+
+workerTs:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/example/gwi-worker-ts
+    tag: latest
+    pullPolicy: IfNotPresent
+  env:
+    ORCHESTRATOR: bullmq
+    SECRET_SCAN_MODE: warn
+
+workerRust:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/example/gwi-worker-rust
+    tag: latest
+    pullPolicy: IfNotPresent
+
+temporalWorker:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/example/gwi-temporal-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  env:
+    ORCHESTRATOR: temporal

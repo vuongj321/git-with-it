@@ -1,0 +1,30 @@
+{{- if .Values.workerTs.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gwi.fullname" . }}-worker-ts
+  labels:
+    {{- include "gwi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker-ts
+spec:
+  replicas: {{ .Values.workerTs.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "gwi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker-ts
+  template:
+    metadata:
+      labels:
+        {{- include "gwi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker-ts
+    spec:
+      containers:
+        - name: worker-ts
+          image: "{{ .Values.workerTs.image.repository }}:{{ .Values.workerTs.image.tag }}"
+          imagePullPolicy: {{ .Values.workerTs.image.pullPolicy }}
+          env:
+            - name: ORCHESTRATOR
+              value: {{ .Values.workerTs.env.ORCHESTRATOR | quote }}
+            - name: SECRET_SCAN_MODE
+              value: {{ .Values.workerTs.env.SECRET_SCAN_MODE | quote }}
+{{- end }}

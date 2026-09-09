@@ -4,28 +4,28 @@ overview: "Harden Git With It for multi-tenant production use: more languages, o
 todos:
   - id: p5-languages
     content: Add Go and Java tree-sitter language packs with FQN rules and golden fixtures
-    status: pending
+    status: completed
   - id: p5-temporal
     content: Migrate analysis saga from BullMQ to Temporal with heartbeats, cancel, and child batch workflows
-    status: pending
+    status: completed
   - id: p5-tenancy
     content: "Tenancy hardening: IDOR tests, storage prefixes, Neo4j scoping, cold storage policy"
-    status: pending
+    status: completed
   - id: p5-billing
     content: Plans, usage quotas, Stripe Team billing, enforce at analyze/AI enqueue
-    status: pending
+    status: completed
   - id: p5-scip
     content: Optional SCIP precision path behind feature flag with safe invoke policy
-    status: pending
+    status: completed
   - id: p5-github-app
     content: GitHub App install + push-triggered tip reanalyze
-    status: pending
+    status: completed
   - id: p5-deploy-sre
     content: Terraform/Helm staging+prod, SLOs/alerts, OTel, backup/restore runbooks
-    status: pending
+    status: completed
   - id: p5-security-load
     content: "Security: threat model, secret scanning, KMS secrets, load test + density backoff"
-    status: pending
+    status: completed
 isProject: false
 ---
 

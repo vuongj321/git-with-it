@@ -1,6 +1,6 @@
 # Git With It
 
-AI-powered software evolution platform. Phase 0–4: clone, parse/identity, sampled evolution, ClickHouse metrics, product UI (graph / timeline / metrics / compare), and evidence-grounded AI insights.
+AI-powered software evolution platform. Phase 0–5: clone, parse/identity (TS/JS/Python/Go/Java), sampled evolution, ClickHouse metrics, product UI, AI insights, plus hardening (quotas, Temporal dual-run, tenancy, GitHub App tip sync, SCIP flag path).
 
 ## Prerequisites
 
@@ -53,7 +53,7 @@ apps/web          Next.js product UI (overview, graph, timeline, metrics, compar
 apps/api          NestJS control plane + Drizzle + ClickHouse metrics + insights APIs
 apps/worker-ts    BullMQ clone → … → metrics_write → evolve → ai
 crates/gwi-git    Bare clone / fetch / blob / first-parent log / diff-tree
-crates/gwi-parse  tree-sitter TS/JS + Python extractors
+crates/gwi-parse  tree-sitter TS/JS + Python + Go + Java extractors
 crates/gwi-link   Import → FQN resolution
 crates/gwi-graph  Package/file graph builder
 crates/gwi-metrics Architectural metrics from graph snapshots
@@ -81,7 +81,21 @@ docs/adr/         Architecture Decision Records
 | `GET /v1/repos/:id/entities/:entityId/insights` | Insights mentioning an entity |
 | `POST /v1/repos/:id/runs/:runId/insights/regenerate` | Re-run AI for a completed sample |
 
+| `POST /v1/repos/:id/insights/:insightId/dismiss` | Dismiss / snooze / feedback |
+| `GET /v1/billing/usage?orgId=` | Plan + usage counters |
+| `POST /v1/billing/checkout` | Stripe Team Checkout (or mock) |
+| `POST /v1/github/webhook` | GitHub App push → tip reanalyze |
+
 Insights are grounded in measured signals (metrics, diffs, evolution events)—not freeform repo chat.
+
+### Phase 5 ops knobs
+
+| Env | Purpose |
+|---|---|
+| `ORCHESTRATOR` | `bullmq` (default) or `temporal` dual-run |
+| `SECRET_SCAN_MODE` | `off` \| `warn` \| `block` on clone |
+| `STRIPE_*` | Team billing Checkout |
+| `GITHUB_WEBHOOK_SECRET` | Hub signature verification |
 
 ## Product routes
 
