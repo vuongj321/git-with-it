@@ -1,6 +1,6 @@
 # Git With It
 
-AI-powered software evolution platform. Phase 0–3: clone, parse/identity, sampled evolution, ClickHouse metrics, and product UI (graph / timeline / metrics / compare).
+AI-powered software evolution platform. Phase 0–4: clone, parse/identity, sampled evolution, ClickHouse metrics, product UI (graph / timeline / metrics / compare), and evidence-grounded AI insights.
 
 ## Prerequisites
 
@@ -34,24 +34,36 @@ Default login after seed: `admin@git-with-it.local` / `admin1234` (org slug `dem
 
 See [docs/architecture/local-dev.md](docs/architecture/local-dev.md) for ports and service details.
 
+### AI insights (optional)
+
+After `evolve`, the worker enqueues an `ai` job that ranks anomaly candidates, builds `evidence_v1` bundles, and (when enabled) generates schema-validated insights.
+
+| Env | Purpose |
+|---|---|
+| `AI_PROVIDER` | `disabled` (default), `mock`, `openai`, or `anthropic` |
+| `AI_MODEL` | Model id (default `mock-grounded-v1`) |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Required only for live providers |
+
+Use `AI_PROVIDER=mock` for local/CI narratives with no live key. With `disabled`, the run still finishes; the Insights UI shows an “AI disabled” banner.
+
 ## Workspace layout
 
 ```
-apps/web          Next.js product UI (overview, graph, timeline, metrics, compare)
-apps/api          NestJS control plane + Drizzle + ClickHouse metrics APIs
-apps/worker-ts    BullMQ clone → enumerate → parse_commit → metrics_write → evolve
+apps/web          Next.js product UI (overview, graph, timeline, metrics, compare, insights)
+apps/api          NestJS control plane + Drizzle + ClickHouse metrics + insights APIs
+apps/worker-ts    BullMQ clone → … → metrics_write → evolve → ai
 crates/gwi-git    Bare clone / fetch / blob / first-parent log / diff-tree
 crates/gwi-parse  tree-sitter TS/JS + Python extractors
 crates/gwi-link   Import → FQN resolution
 crates/gwi-graph  Package/file graph builder
 crates/gwi-metrics Architectural metrics from graph snapshots
 testdata/         Mini repos + golden parse / evolution / metrics fixtures
-packages/*        shared-types (sampling, gwi-diff, events, metrics), tsconfig, eslint
+packages/*        shared-types (sampling, gwi-diff, events, metrics, insights), tsconfig, eslint
 infra/            docker-compose + ClickHouse init + terraform stub
 docs/adr/         Architecture Decision Records
 ```
 
-## Phase 3 APIs
+## Phase 3–4 APIs
 
 | Endpoint | Purpose |
 |---|---|
@@ -64,10 +76,16 @@ docs/adr/         Architecture Decision Records
 | `GET /v1/repos/:id/graph/diff?from=&to=` | Node/edge/SCC diff |
 | `GET /v1/repos/:id/timeline` | Typed `evolution_events` |
 | `POST /v1/repos/:id/compare` | Body `{ from, to }` → diff payload |
+| `GET /v1/repos/:id/insights?severity=&category=` | Insight feed |
+| `GET /v1/repos/:id/insights/:insightId` | Insight detail |
+| `GET /v1/repos/:id/entities/:entityId/insights` | Insights mentioning an entity |
+| `POST /v1/repos/:id/runs/:runId/insights/regenerate` | Re-run AI for a completed sample |
+
+Insights are grounded in measured signals (metrics, diffs, evolution events)—not freeform repo chat.
 
 ## Product routes
 
-`/[org]/repos/[repo]/{overview,graph,timeline,metrics,compare,insights}` — shareable `sha` / `from` / `to` / `metric` / `view` query params.
+`/[org]/repos/[repo]/{overview,graph,timeline,metrics,compare,insights}` — shareable `sha` / `from` / `to` / `metric` / `view` / `focus` / `severity` / `category` query params.
 
 ## Scripts
 
