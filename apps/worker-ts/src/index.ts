@@ -20,6 +20,11 @@ import { processMetricsWriteJob } from './metrics-write';
 import { processParseCommitJob } from './parse-commit';
 import { processParseJob } from './parse';
 
+logger.info(
+  { ai_provider: env.AI_PROVIDER, ai_model: env.AI_MODEL },
+  'worker starting',
+);
+
 const connection = { url: env.REDIS_URL };
 
 const cloneWorker = new Worker(

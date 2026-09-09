@@ -7,12 +7,38 @@ export function getToken(): string | null {
 }
 
 export function setToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token);
+  const cleaned = token.replace(/^Bearer\s+/i, '').trim();
+  localStorage.setItem(TOKEN_KEY, cleaned);
 }
 
 export function clearToken() {
   localStorage.setItem(TOKEN_KEY, '');
   localStorage.removeItem(TOKEN_KEY);
+}
+
+async function tokenFromSession(): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const { getSession } = await import('next-auth/react');
+    const session = await getSession();
+    const fromSession =
+      typeof session?.accessToken === 'string' && session.accessToken.length > 0
+        ? session.accessToken
+        : null;
+    if (fromSession) setToken(fromSession);
+    return fromSession;
+  } catch {
+    return null;
+  }
+}
+
+/** Prefer localStorage; fall back to NextAuth session.accessToken (login may only set the cookie). */
+async function resolveAccessToken(opts?: { preferSession?: boolean }): Promise<string | null> {
+  if (!opts?.preferSession) {
+    const existing = getToken();
+    if (existing) return existing;
+  }
+  return tokenFromSession();
 }
 
 export async function api<T>(
@@ -21,11 +47,21 @@ export async function api<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('content-type', 'application/json');
-  if (init.auth !== false) {
-    const token = getToken();
+  const useAuth = init.auth !== false;
+  if (useAuth) {
+    const token = await resolveAccessToken();
     if (token) headers.set('authorization', `Bearer ${token}`);
   }
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  let res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  // Stale localStorage JWT with a fresh NextAuth session — refresh once.
+  if (useAuth && res.status === 401) {
+    clearToken();
+    const refreshed = await resolveAccessToken({ preferSession: true });
+    if (refreshed) {
+      headers.set('authorization', `Bearer ${refreshed}`);
+      res = await fetch(`${API_URL}${path}`, { ...init, headers });
+    }
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `${res.status} ${res.statusText}`);

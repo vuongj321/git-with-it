@@ -2,6 +2,7 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Request } from 'express';
@@ -20,15 +21,31 @@ declare global {
 
 @Injectable()
 export class JwtOrSessionAuthGuard implements CanActivate {
+  private readonly logger = new Logger(JwtOrSessionAuthGuard.name);
+
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<Request>();
-    const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) {
+    const raw = req.headers.authorization;
+    const header = Array.isArray(raw) ? raw[0] : raw;
+    if (!header) {
+      this.logger.warn(`401 missing Authorization on ${req.method} ${req.url}`);
       throw new UnauthorizedException('Missing Bearer token');
     }
-    const token = header.slice('Bearer '.length).trim();
+    const match = /^\s*Bearer\s+(\S+)\s*$/i.exec(header);
+    if (!match) {
+      this.logger.warn(
+        `401 malformed Authorization (len=${header.length}) on ${req.method} ${req.url}`,
+      );
+      throw new UnauthorizedException('Authorization header must be Bearer <token>');
+    }
+    let token = match[1]!;
     if (!token) {
+      this.logger.warn(`401 empty Bearer token on ${req.method} ${req.url}`);
       throw new UnauthorizedException('Empty token');
+    }
+    // Tolerate accidental nested "Bearer <token>" stored in localStorage.
+    if (/^bearer\s+/i.test(token)) {
+      token = token.replace(/^bearer\s+/i, '').trim();
     }
 
     if (isValidServiceToken(token)) {
@@ -45,7 +62,12 @@ export class JwtOrSessionAuthGuard implements CanActivate {
       const claims = await verifySessionToken(token);
       req.user = { ...claims, userId: claims.sub };
       return true;
-    } catch {
+    } catch (err) {
+      this.logger.warn(
+        `401 invalid JWT (parts=${token.split('.').length}, len=${token.length}) on ${req.method} ${req.url}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
       throw new UnauthorizedException('Invalid session token');
     }
   }

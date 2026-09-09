@@ -11,7 +11,7 @@ export default function InsightsPage() {
   const router = useRouter();
   const search = useSearchParams();
   const { severity, category, setState } = useRepoUrlState();
-  const runId = search.get('runId');
+  const runIdFromUrl = search.get('runId');
   const base = `/${params.org}/repos/${params.repo}`;
 
   const orgQuery = useQuery({
@@ -25,11 +25,20 @@ export default function InsightsPage() {
     queryFn: () => api<Repo>(`/v1/repos/${params.repo}?orgId=${orgQuery.data!.id}`),
   });
 
-  const runQuery = useQuery({
-    queryKey: ['run-insights', params.repo, runId, orgQuery.data?.id],
-    enabled: Boolean(orgQuery.data?.id && runId),
+  const latestRunQuery = useQuery({
+    queryKey: ['run-latest', params.repo, orgQuery.data?.id],
+    enabled: Boolean(orgQuery.data?.id && !runIdFromUrl),
     queryFn: () =>
-      api<Run>(`/v1/repos/${params.repo}/runs/${runId}?orgId=${orgQuery.data!.id}`),
+      api<Run>(`/v1/repos/${params.repo}/runs/latest?orgId=${orgQuery.data!.id}`),
+  });
+
+  const effectiveRunId = runIdFromUrl ?? latestRunQuery.data?.id ?? null;
+
+  const runQuery = useQuery({
+    queryKey: ['run-insights', params.repo, effectiveRunId, orgQuery.data?.id],
+    enabled: Boolean(orgQuery.data?.id && effectiveRunId),
+    queryFn: () =>
+      api<Run>(`/v1/repos/${params.repo}/runs/${effectiveRunId}?orgId=${orgQuery.data!.id}`),
     refetchInterval: (q) => {
       const status = q.state.data?.status;
       if (!status || status === 'evolution_ready' || status === 'failed') return false;
@@ -51,16 +60,24 @@ export default function InsightsPage() {
   });
 
   async function regenerate() {
-    if (!orgQuery.data || !runId) return;
-    await api(`/v1/repos/${params.repo}/runs/${runId}/insights/regenerate?orgId=${orgQuery.data.id}`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
+    if (!orgQuery.data || !effectiveRunId) return;
+    await api(
+      `/v1/repos/${params.repo}/runs/${effectiveRunId}/insights/regenerate?orgId=${orgQuery.data.id}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
+    await insightsQuery.refetch();
+    await runQuery.refetch();
     router.refresh();
   }
 
   const run = runQuery.data;
-  const aiDisabled = repoQuery.data && run?.status !== 'ai_generating' && insightsQuery.data?.length === 0;
+  const waitingForProvider =
+    insightsQuery.data?.length === 0 &&
+    run?.status !== 'ai_generating' &&
+    Boolean(repoQuery.data);
 
   return (
     <div className="stack">
@@ -100,7 +117,7 @@ export default function InsightsPage() {
               <option value="hotspot">hotspot</option>
             </select>
           </label>
-          {runId ? (
+          {effectiveRunId ? (
             <button type="button" className="btn btn-ghost" onClick={() => void regenerate()}>
               Regenerate
             </button>
@@ -114,11 +131,11 @@ export default function InsightsPage() {
         </section>
       ) : null}
 
-      {aiDisabled ? (
+      {waitingForProvider ? (
         <section className="panel">
           <p className="muted">
-            AI disabled or no provider configured. Candidates and evidence can still be generated,
-            but no published insight narratives are available.
+            No published insights yet. With <span className="mono">AI_PROVIDER=mock</span>, click
+            Regenerate after the worker has restarted so narratives are published.
           </p>
         </section>
       ) : null}
@@ -168,7 +185,7 @@ export default function InsightsPage() {
         </section>
       ))}
 
-      {!insightsQuery.isLoading && (insightsQuery.data ?? []).length === 0 && !aiDisabled ? (
+      {!insightsQuery.isLoading && (insightsQuery.data ?? []).length === 0 && !waitingForProvider ? (
         <section className="panel">
           <p className="muted">No insights matched the current filters.</p>
         </section>

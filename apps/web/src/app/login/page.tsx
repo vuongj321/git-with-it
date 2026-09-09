@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { signIn } from 'next-auth/react';
+import { getSession, signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { api, setToken } from '@/lib/api';
 
@@ -26,13 +26,18 @@ export default function LoginPage() {
         throw new Error('Invalid email or password');
       }
 
-      // Also store API JWT for Bearer calls (issued by Nest login).
-      const login = await api<{ accessToken: string }>('/v1/auth/login', {
-        method: 'POST',
-        auth: false,
-        body: JSON.stringify({ email, password }),
-      });
-      setToken(login.accessToken);
+      // Nest JWT for Bearer calls — prefer session (already fetched in authorize), else login again.
+      const session = await getSession();
+      if (typeof session?.accessToken === 'string' && session.accessToken.length > 0) {
+        setToken(session.accessToken);
+      } else {
+        const login = await api<{ accessToken: string }>('/v1/auth/login', {
+          method: 'POST',
+          auth: false,
+          body: JSON.stringify({ email, password }),
+        });
+        setToken(login.accessToken);
+      }
 
       const orgs = await api<Array<{ slug: string }>>('/v1/orgs');
       const slug = orgs[0]?.slug ?? 'demo';

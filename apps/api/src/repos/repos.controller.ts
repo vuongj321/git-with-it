@@ -794,6 +794,20 @@ export class ReposController {
     return { ok: true };
   }
 
+  @Get(':id/runs/latest')
+  async latestRun(@Param('id') id: string, @Query('orgId') orgId: string) {
+    await this.requireRepo(id, orgId);
+    const rows = await db
+      .select()
+      .from(analysisRuns)
+      .where(eq(analysisRuns.repoId, id))
+      .orderBy(desc(analysisRuns.createdAt))
+      .limit(1);
+    const run = rows[0];
+    if (!run) throw new NotFoundException('No analysis runs for this repository');
+    return serializeRun(run);
+  }
+
   @Get(':id/runs/:runId')
   async getRun(
     @Param('id') id: string,
