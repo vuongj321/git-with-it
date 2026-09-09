@@ -16,16 +16,12 @@ struct Cli {
 enum Commands {
     /// Clone a remote as a bare repository into --path
     Clone {
-        /// Remote URL (https)
         #[arg(long)]
         url: String,
-        /// Destination directory for the bare repo
         #[arg(long)]
         path: PathBuf,
-        /// Optional branch to set as HEAD after clone
         #[arg(long)]
         branch: Option<String>,
-        /// Optional token for private HTTPS remotes (x-access-token)
         #[arg(long)]
         token: Option<String>,
     },
@@ -49,7 +45,6 @@ enum Commands {
         path: PathBuf,
         #[arg(long)]
         sha: String,
-        /// Optional path prefix filter (e.g. src/)
         #[arg(long)]
         prefix: Option<String>,
     },
@@ -57,7 +52,6 @@ enum Commands {
     CatFile {
         #[arg(long)]
         path: PathBuf,
-        /// Object id or `commit:path` tree-ish
         #[arg(long)]
         oid: String,
     },
@@ -69,6 +63,29 @@ enum Commands {
         sha: String,
         #[arg(long)]
         file: String,
+    },
+    /// Walk first-parent history tip→past. JSONL lines:
+    /// {"sha","parents":[],"authored_at","message"}
+    LogFirstParent {
+        #[arg(long)]
+        path: PathBuf,
+        /// Starting rev (default HEAD)
+        #[arg(long, default_value = "HEAD")]
+        rev: String,
+        /// Max commits to walk (0 = unbounded)
+        #[arg(long, default_value_t = 0)]
+        max: usize,
+    },
+    /// Diff two trees with rename detection (-M). JSONL:
+    /// {"status":"A|M|D|R","path","old_path","new_oid","old_oid","score"}
+    DiffTree {
+        #[arg(long)]
+        path: PathBuf,
+        /// Parent/from commit (omit or empty for empty tree vs --to)
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: String,
     },
 }
 
@@ -94,6 +111,8 @@ fn main() -> Result<()> {
             print!("{}", oid.trim());
             Ok(())
         }
+        Commands::LogFirstParent { path, rev, max } => cmd_log_first_parent(path, rev, max),
+        Commands::DiffTree { path, from, to } => cmd_diff_tree(path, from, to),
     }
 }
 
@@ -188,7 +207,6 @@ fn cmd_ls_tree(path: PathBuf, sha: String, prefix: Option<String>) -> Result<()>
 }
 
 fn cmd_cat_file(path: PathBuf, oid: String) -> Result<()> {
-    // Stream blob bytes to stdout (may be binary)
     let status = Command::new("git")
         .args(["-C", &path.display().to_string(), "cat-file", "-p", &oid])
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -210,6 +228,146 @@ fn cmd_cat_file(path: PathBuf, oid: String) -> Result<()> {
     Ok(())
 }
 
+fn cmd_log_first_parent(path: PathBuf, rev: String, max: usize) -> Result<()> {
+    // %H sha, %P parents, %aI author date ISO, %B body (subject+body) — use %s for subject only
+    // Record separator 0x1e between commits; field sep 0x1f
+    let mut args = vec![
+        "log".to_string(),
+        "--first-parent".to_string(),
+        "--format=%H%x1f%P%x1f%aI%x1f%s".to_string(),
+        rev,
+    ];
+    if max > 0 {
+        args.insert(1, format!("-n{max}"));
+    }
+    let out = git_output_args(&path, &args)?;
+    for line in out.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.split('\u{1f}').collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let sha = parts[0];
+        let parents: Vec<&str> = parts[1]
+            .split_whitespace()
+            .filter(|p| !p.is_empty())
+            .collect();
+        let authored = parts[2];
+        let message = parts[3].replace('\\', "\\\\").replace('"', "\\\"");
+        let parents_json = parents
+            .iter()
+            .map(|p| format!("\"{p}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"sha\":\"{sha}\",\"parents\":[{parents_json}],\"authored_at\":\"{authored}\",\"message\":\"{message}\"}}"
+        );
+    }
+    Ok(())
+}
+
+fn cmd_diff_tree(path: PathBuf, from: Option<String>, to: String) -> Result<()> {
+    // --raw -z -M: NUL-separated raw diff with renames
+    let mut args = vec![
+        "diff-tree".to_string(),
+        "-r".to_string(),
+        "-M".to_string(),
+        "--raw".to_string(),
+        "-z".to_string(),
+    ];
+    if let Some(f) = from.filter(|s| !s.is_empty()) {
+        args.push(f);
+    } else {
+        // Empty tree
+        args.push("4b825dc642cb6eb9a060e54bf8d6927bfb56357591".to_string());
+    }
+    args.push(to);
+    let out = git_output_args(&path, &args)?;
+    // Format with -z: lines like ":oldmode newmode oldoid newoid status\0path\0" or
+    // for rename ":...\0score\0oldpath\0newpath\0" — actually raw -z:
+    // Each record: `:<old_mode> <new_mode> <old_sha> <new_sha> <status>\0<path>\0`
+    // Rename: status is R###, then path is old\0new
+    let bytes = out.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // find start ':'
+        while i < bytes.len() && bytes[i] != b':' {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        let meta_start = i + 1;
+        let mut meta_end = meta_start;
+        while meta_end < bytes.len() && bytes[meta_end] != 0 {
+            meta_end += 1;
+        }
+        if meta_end >= bytes.len() {
+            break;
+        }
+        let meta = std::str::from_utf8(&bytes[meta_start..meta_end]).unwrap_or("");
+        // meta: "100644 100644 oid oid M" or "100644 100644 oid oid R095"
+        let parts: Vec<&str> = meta.split_whitespace().collect();
+        if parts.len() < 5 {
+            i = meta_end + 1;
+            continue;
+        }
+        let old_oid = parts[2];
+        let new_oid = parts[3];
+        let status_raw = parts[4];
+        let status_char = status_raw.chars().next().unwrap_or('M');
+        let score: Option<u32> = if status_char == 'R' || status_char == 'C' {
+            status_raw.get(1..).and_then(|s| s.parse().ok())
+        } else {
+            None
+        };
+
+        i = meta_end + 1;
+        let path1_start = i;
+        while i < bytes.len() && bytes[i] != 0 {
+            i += 1;
+        }
+        let path1 = std::str::from_utf8(&bytes[path1_start..i]).unwrap_or("");
+        i += 1; // skip NUL
+
+        let (old_path, path, status) = if status_char == 'R' || status_char == 'C' {
+            let path2_start = i;
+            while i < bytes.len() && bytes[i] != 0 {
+                i += 1;
+            }
+            let path2 = std::str::from_utf8(&bytes[path2_start..i]).unwrap_or("");
+            i += 1;
+            (
+                Some(path1.to_string()),
+                path2.to_string(),
+                status_char.to_string(),
+            )
+        } else {
+            (None, path1.to_string(), status_char.to_string())
+        };
+
+        let old_path_json = match &old_path {
+            Some(p) => format!("\"{}\"", json_escape(p)),
+            None => "null".to_string(),
+        };
+        let score_json = match score {
+            Some(s) => s.to_string(),
+            None => "null".to_string(),
+        };
+        println!(
+            "{{\"status\":\"{status}\",\"path\":\"{}\",\"old_path\":{old_path_json},\"old_oid\":\"{old_oid}\",\"new_oid\":\"{new_oid}\",\"score\":{score_json}}}",
+            json_escape(&path)
+        );
+    }
+    Ok(())
+}
+
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn run_git(args: &[String]) -> Result<()> {
     let status = Command::new("git")
         .args(args)
@@ -223,6 +381,11 @@ fn run_git(args: &[String]) -> Result<()> {
 }
 
 fn git_output(cwd: &PathBuf, args: &[&str]) -> Result<String> {
+    let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    git_output_args(cwd, &owned)
+}
+
+fn git_output_args(cwd: &PathBuf, args: &[String]) -> Result<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(cwd)

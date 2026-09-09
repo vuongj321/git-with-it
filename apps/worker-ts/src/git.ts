@@ -41,7 +41,6 @@ export async function gwiGit(args: string[]) {
   try {
     return await runCommand(env.GWI_GIT_BIN, args);
   } catch (err) {
-    // Fall back to system git if gwi-git is not on PATH (dev without Rust build)
     const message = err instanceof Error ? err.message : String(err);
     if (!message.includes('ENOENT') && !message.includes('not found')) {
       throw err;
@@ -51,7 +50,6 @@ export async function gwiGit(args: string[]) {
 }
 
 async function runGitFallback(args: string[]) {
-  // Translate gwi-git CLI → git
   if (args[0] === 'clone') {
     const url = flagValue(args, '--url');
     const path = flagValue(args, '--path');
@@ -93,6 +91,91 @@ async function runGitFallback(args: string[]) {
     const rev = flagValue(args, '--rev') ?? 'HEAD';
     if (!path) throw new Error('rev-parse requires --path');
     return runCommand('git', ['-C', path, 'rev-parse', rev]);
+  }
+  if (args[0] === 'log-first-parent') {
+    const path = flagValue(args, '--path');
+    const rev = flagValue(args, '--rev') ?? 'HEAD';
+    const max = flagValue(args, '--max');
+    if (!path) throw new Error('log-first-parent requires --path');
+    const gitArgs = [
+      '-C',
+      path,
+      'log',
+      '--first-parent',
+      '--format=%H%x1f%P%x1f%aI%x1f%s',
+      rev,
+    ];
+    if (max && Number(max) > 0) gitArgs.splice(3, 0, `-n${max}`);
+    const res = await runCommand('git', gitArgs);
+    const lines: string[] = [];
+    for (const line of res.stdout.split('\n')) {
+      if (!line.trim()) continue;
+      const parts = line.split('\u001f');
+      if (parts.length < 4) continue;
+      const [sha, parentsRaw, authored, message] = parts;
+      const parents = (parentsRaw ?? '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((p) => `"${p}"`)
+        .join(',');
+      const msg = (message ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      lines.push(
+        `{"sha":"${sha}","parents":[${parents}],"authored_at":"${authored}","message":"${msg}"}`,
+      );
+    }
+    return { stdout: lines.join('\n') + (lines.length ? '\n' : ''), stderr: '' };
+  }
+  if (args[0] === 'diff-tree') {
+    const path = flagValue(args, '--path');
+    const from = flagValue(args, '--from');
+    const to = flagValue(args, '--to');
+    if (!path || !to) throw new Error('diff-tree requires --path --to');
+    const emptyTree = '4b825dc642cb6eb9a060e54bf8d6927bfb56357591';
+    const gitArgs = [
+      '-C',
+      path,
+      'diff-tree',
+      '-r',
+      '-M',
+      '--name-status',
+      from && from.length ? from : emptyTree,
+      to,
+    ];
+    const res = await runCommand('git', gitArgs);
+    const lines: string[] = [];
+    for (const line of res.stdout.split('\n')) {
+      if (!line.trim()) continue;
+      const cols = line.split('\t');
+      const statusRaw = cols[0] ?? 'M';
+      const status = statusRaw[0] ?? 'M';
+      if (status === 'R' || status === 'C') {
+        const oldPath = cols[1] ?? '';
+        const newPath = cols[2] ?? '';
+        const score = Number(statusRaw.slice(1)) || null;
+        lines.push(
+          JSON.stringify({
+            status,
+            path: newPath,
+            old_path: oldPath,
+            old_oid: '',
+            new_oid: '',
+            score,
+          }),
+        );
+      } else {
+        lines.push(
+          JSON.stringify({
+            status,
+            path: cols[1] ?? '',
+            old_path: null,
+            old_oid: '',
+            new_oid: '',
+            score: null,
+          }),
+        );
+      }
+    }
+    return { stdout: lines.join('\n') + (lines.length ? '\n' : ''), stderr: '' };
   }
   throw new Error(`Unsupported gwi-git args: ${args.join(' ')}`);
 }
