@@ -39,6 +39,7 @@ export const runStatusEnum = pgEnum('run_status', [
   'graph_ready',
   'metrics_writing',
   'evolving',
+  'ai_generating',
   'evolution_ready',
   'failed',
 ]);
@@ -53,6 +54,7 @@ export const jobTypeEnum = pgEnum('job_type', [
   'checkpoint',
   'metrics_write',
   'evolve',
+  'ai',
 ]);
 
 export const jobStatusEnum = pgEnum('job_status', [
@@ -88,6 +90,27 @@ export const evolutionSeverityEnum = pgEnum('evolution_severity', [
   'low',
   'medium',
   'high',
+]);
+
+export const insightSeverityEnum = pgEnum('insight_severity', [
+  'low',
+  'medium',
+  'high',
+  'critical',
+]);
+
+export const insightCategoryEnum = pgEnum('insight_category', [
+  'debt',
+  'drift',
+  'risk',
+  'refactor',
+  'hotspot',
+]);
+
+export const insightStatusEnum = pgEnum('insight_status', [
+  'published',
+  'failed_validation',
+  'skipped_no_provider',
 ]);
 
 export const organizations = pgTable(
@@ -366,6 +389,88 @@ export const evolutionEvents = pgTable(
   ],
 );
 
+export const insightEvidence = pgTable(
+  'insight_evidence',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    repoId: uuid('repo_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id').references(() => analysisRuns.id, { onDelete: 'set null' }),
+    evidenceHash: text('evidence_hash').notNull(),
+    bundle: jsonb('bundle').$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('insight_evidence_repo_hash_uidx').on(t.repoId, t.evidenceHash),
+    index('insight_evidence_repo_run_idx').on(t.repoId, t.runId),
+  ],
+);
+
+export const insightCandidates = pgTable(
+  'insight_candidates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    repoId: uuid('repo_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id').references(() => analysisRuns.id, { onDelete: 'set null' }),
+    candidateKey: text('candidate_key').notNull(),
+    type: text('type').notNull(),
+    title: text('title').notNull(),
+    score: doublePrecision('score').notNull().default(0),
+    fromSha: text('from_sha').notNull(),
+    toSha: text('to_sha').notNull(),
+    entityIds: jsonb('entity_ids').$type<string[]>().default([]),
+    signalRefs: jsonb('signal_refs').$type<string[]>().default([]),
+    evidenceHash: text('evidence_hash'),
+    status: text('status').notNull().default('queued'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('insight_candidates_repo_run_key_uidx').on(t.repoId, t.runId, t.candidateKey),
+    index('insight_candidates_repo_run_idx').on(t.repoId, t.runId),
+  ],
+);
+
+export const insights = pgTable(
+  'insights',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    repoId: uuid('repo_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id').references(() => analysisRuns.id, { onDelete: 'set null' }),
+    candidateId: uuid('candidate_id').references(() => insightCandidates.id, {
+      onDelete: 'set null',
+    }),
+    evidenceId: uuid('evidence_id').references(() => insightEvidence.id, {
+      onDelete: 'set null',
+    }),
+    headline: text('headline').notNull(),
+    narrative: text('narrative').notNull(),
+    severity: insightSeverityEnum('severity').notNull(),
+    category: insightCategoryEnum('category').notNull(),
+    entityIds: jsonb('entity_ids').$type<string[]>().default([]),
+    fromSha: text('from_sha').notNull(),
+    toSha: text('to_sha').notNull(),
+    evidenceHash: text('evidence_hash').notNull(),
+    model: text('model'),
+    provider: text('provider'),
+    promptHash: text('prompt_hash'),
+    confidence: doublePrecision('confidence').notNull().default(0),
+    status: insightStatusEnum('status').notNull().default('published'),
+    suggestedActions: jsonb('suggested_actions').$type<string[]>().default([]),
+    citedSignals: jsonb('cited_signals').$type<string[]>().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('insights_repo_run_hash_uidx').on(t.repoId, t.runId, t.evidenceHash),
+    index('insights_repo_created_idx').on(t.repoId, t.createdAt),
+    index('insights_repo_severity_idx').on(t.repoId, t.severity),
+  ],
+);
+
 export type Organization = typeof organizations.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
@@ -379,3 +484,6 @@ export type EntityAppearance = typeof entityAppearances.$inferSelect;
 export type EntityRename = typeof entityRenames.$inferSelect;
 export type GraphDelta = typeof graphDeltas.$inferSelect;
 export type EvolutionEvent = typeof evolutionEvents.$inferSelect;
+export type InsightEvidence = typeof insightEvidence.$inferSelect;
+export type InsightCandidate = typeof insightCandidates.$inferSelect;
+export type Insight = typeof insights.$inferSelect;
