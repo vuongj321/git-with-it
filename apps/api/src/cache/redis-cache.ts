@@ -5,16 +5,20 @@ let redis: Redis | null = null;
 
 export function getRedisCache(): Redis {
   if (!redis) {
-    redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: true });
+    redis = new Redis(env.REDIS_URL, {
+      maxRetriesPerRequest: 2,
+      enableOfflineQueue: false,
+    });
+    redis.on('error', () => {
+      // best-effort cache; avoid crashing the API
+    });
   }
   return redis;
 }
 
 export async function cacheGet<T>(key: string): Promise<T | null> {
   try {
-    const r = getRedisCache();
-    if (r.status !== 'ready') await r.connect().catch(() => undefined);
-    const raw = await r.get(key);
+    const raw = await getRedisCache().get(key);
     if (!raw) return null;
     return JSON.parse(raw) as T;
   } catch {
@@ -24,9 +28,7 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
 
 export async function cacheSet(key: string, value: unknown, ttlSeconds: number) {
   try {
-    const r = getRedisCache();
-    if (r.status !== 'ready') await r.connect().catch(() => undefined);
-    await r.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+    await getRedisCache().set(key, JSON.stringify(value), 'EX', ttlSeconds);
   } catch {
     // cache is best-effort
   }
@@ -35,7 +37,6 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds: number) 
 export async function invalidateRepoCaches(repoId: string) {
   try {
     const r = getRedisCache();
-    if (r.status !== 'ready') await r.connect().catch(() => undefined);
     const patterns = [`graph:${repoId}:*`, `metrics:${repoId}:*`];
     for (const pattern of patterns) {
       let cursor = '0';

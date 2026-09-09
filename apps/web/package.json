@@ -8,19 +8,26 @@
     "start": "next start --port 3000",
     "lint": "eslint src --max-warnings 0",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@gwi/shared-types": "workspace:*",
     "@tanstack/react-query": "^5.62.8",
+    "echarts": "^6.1.0",
+    "echarts-for-react": "^3.0.6",
+    "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
     "next": "^15.1.2",
     "next-auth": "^4.24.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sigma": "^3.0.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@gwi/tsconfig": "workspace:*",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

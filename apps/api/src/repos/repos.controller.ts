@@ -355,7 +355,28 @@ export class ReposController {
       metric: parsed.metric,
       view: parsed.view,
     });
-    const payload = { sha: parsed.sha, metric: parsed.metric, view: parsed.view, values };
+    const entityRows = await db
+      .select({ id: entities.id, fqn: entities.fqn, kind: entities.kind })
+      .from(entities)
+      .where(eq(entities.repoId, repo.id));
+    const byId = new Map(entityRows.map((e) => [e.id, e]));
+    const enriched = values.map((v) => {
+      const ent = byId.get(v.entityId);
+      const graphId = ent
+        ? ent.kind === 'package'
+          ? `pkg:${ent.fqn}`
+          : ent.kind === 'file'
+            ? `file:${ent.fqn}`
+            : ent.fqn
+        : v.entityId;
+      return { ...v, fqn: ent?.fqn ?? null, graphId };
+    });
+    const payload = {
+      sha: parsed.sha,
+      metric: parsed.metric,
+      view: parsed.view,
+      values: enriched,
+    };
     await cacheSet(cacheKey, payload, 300);
     return payload;
   }

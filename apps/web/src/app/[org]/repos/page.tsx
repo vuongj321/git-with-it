@@ -49,7 +49,7 @@ export default function ReposPage() {
         `/v1/repos/${repo.id}/analyze?orgId=${orgQuery.data.id}`,
         { method: 'POST', body: JSON.stringify({}) },
       );
-      router.push(`/${orgSlug}/repos/${repo.id}?runId=${analyzed.run.id}`);
+      router.push(`/${orgSlug}/repos/${repo.id}/overview?runId=${analyzed.run.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect repo');
     } finally {
@@ -121,7 +121,7 @@ export default function ReposPage() {
         <ul className="repo-list">
           {(reposQuery.data ?? []).map((repo) => (
             <li key={repo.id} className="repo-item">
-              <Link href={`/${orgSlug}/repos/${repo.id}`}>
+              <Link href={`/${orgSlug}/repos/${repo.id}/overview`}>
                 <span className="mono">{repo.remoteUrl}</span>
               </Link>
               <div className="row">

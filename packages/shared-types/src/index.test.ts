@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   CreateRepoBodySchema,
   computeMetrics,
@@ -17,10 +16,7 @@ import {
   type WalkedCommit,
 } from './index';
 
-const goldensDir = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../testdata/goldens',
-);
+const goldensDir = path.resolve(__dirname, '../../../testdata/goldens');
 
 describe('isLikelyGitRemoteUrl', () => {
   it('accepts https github urls', () => {
@@ -238,14 +234,17 @@ describe('metrics-cycle golden', () => {
       topoIndex: 1,
     });
 
+    const expectA = golden.expect.aaa1111!;
+    const expectB = golden.expect.bbb2222!;
+
     expect(
       rowsA.find((r) => r.metric === 'cycle_count' && r.entityKind === 'repo')
         ?.value,
-    ).toBe(golden.expect.aaa1111.cycle_count);
+    ).toBe(expectA.cycle_count);
     expect(
       rowsB.find((r) => r.metric === 'cycle_count' && r.entityKind === 'repo')
         ?.value,
-    ).toBe(golden.expect.bbb2222.cycle_count);
+    ).toBe(expectB.cycle_count);
 
     const fanOutA = (fqn: string) =>
       rowsA.find(
@@ -260,9 +259,9 @@ describe('metrics-cycle golden', () => {
           r.entityId === entityId(golden.repoId, 'file', fqn),
       )?.value;
 
-    expect(fanOutA('a.ts')).toBe(golden.expect.aaa1111.file_fan_out!['a.ts']);
-    expect(fanOutA('b.ts')).toBe(golden.expect.aaa1111.file_fan_out!['b.ts']);
-    expect(fanInB('a.ts')).toBe(golden.expect.bbb2222.file_fan_in!['a.ts']);
-    expect(fanInB('b.ts')).toBe(golden.expect.bbb2222.file_fan_in!['b.ts']);
+    expect(fanOutA('a.ts')).toBe(expectA.file_fan_out!['a.ts']);
+    expect(fanOutA('b.ts')).toBe(expectA.file_fan_out!['b.ts']);
+    expect(fanInB('a.ts')).toBe(expectB.file_fan_in!['a.ts']);
+    expect(fanInB('b.ts')).toBe(expectB.file_fan_in!['b.ts']);
   });
 });

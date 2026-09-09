@@ -24,7 +24,7 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: 'Git With It',
-  description: 'Software evolution platform — Phase 0 foundations',
+  description: 'Software evolution platform — metrics, graphs, and timelines',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

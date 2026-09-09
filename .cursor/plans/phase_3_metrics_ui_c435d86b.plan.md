@@ -4,22 +4,22 @@ overview: Ship the ClickHouse metrics pipeline and the primary Next.js product U
 todos:
   - id: p3-metrics-engine
     content: Implement gwi-metrics catalog (loc, fan-in/out, cycles, complexity proxy) aligned to graph SHA
-    status: pending
+    status: completed
   - id: p3-clickhouse-api
     content: ClickHouse schema, metrics_write job, idempotent inserts, Redis-cached metrics APIs
-    status: pending
+    status: completed
   - id: p3-web-routes
     content: "Next.js routes: overview, graph, timeline, metrics, compare + URL state"
-    status: pending
+    status: completed
   - id: p3-graph-viz
     content: "Sigma/Graphology graph: package view, expand, heatmap, diff overlay, side panel"
-    status: pending
+    status: completed
   - id: p3-timeline-metrics-compare
     content: Timeline event UI + metrics charts/tables + compare metric deltas
-    status: pending
+    status: completed
   - id: p3-tests-polish
     content: Playwright smoke tests, metric goldens, design tokens ADR
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -195,10 +195,10 @@ Routes under `apps/web`:
 
 ## Deliverables checklist
 
-- [ ] gwi-metrics + ClickHouse schema + metrics_write job
-- [ ] Metrics/heatmap/summary/delta APIs + Redis cache
-- [ ] Overview, Graph, Timeline, Metrics, Compare UIs
-- [ ] Heatmap + diff overlay on graph
-- [ ] Insights placeholder route
-- [ ] Playwright smoke + metric goldens
-- [ ] ADRs merged
+- [x] gwi-metrics + ClickHouse schema + metrics_write job
+- [x] Metrics/heatmap/summary/delta APIs + Redis cache
+- [x] Overview, Graph, Timeline, Metrics, Compare UIs
+- [x] Heatmap + diff overlay on graph
+- [x] Insights placeholder route
+- [x] Playwright smoke + metric goldens
+- [x] ADRs merged

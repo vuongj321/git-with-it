@@ -81,11 +81,11 @@ export async function writeMetricRows(rows: MetricRow[]) {
     await ch.command({
       query: `ALTER TABLE metrics_entity DELETE WHERE repo_id = {repoId:UUID} AND commit_sha = {sha:String}`,
       query_params: { repoId, sha },
-    });
+    }).catch(() => undefined);
     await ch.command({
       query: `ALTER TABLE metrics_repo DELETE WHERE repo_id = {repoId:UUID} AND commit_sha = {sha:String}`,
       query_params: { repoId, sha },
-    });
+    }).catch(() => undefined);
 
     const entityRows = group.filter((r) => r.entityKind !== 'repo');
     const repoRows = group.filter((r) => r.entityKind === 'repo');

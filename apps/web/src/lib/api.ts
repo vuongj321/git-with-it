@@ -11,6 +11,7 @@ export function setToken(token: string) {
 }
 
 export function clearToken() {
+  localStorage.setItem(TOKEN_KEY, '');
   localStorage.removeItem(TOKEN_KEY);
 }
 
@@ -60,4 +61,101 @@ export type Run = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+};
+
+export type SampleCommit = {
+  sha: string;
+  topoIndex: number | null;
+  reason?: string;
+  message: string | null;
+  authoredAt: string | null;
+};
+
+export type EvolutionEvent = {
+  id: string;
+  type: string;
+  severity: string;
+  title: string;
+  fromSha: string;
+  toSha: string;
+  authoredAt: string | null;
+  payload?: Record<string, unknown>;
+  entityIds?: string[];
+};
+
+export type GraphNodeDto = {
+  id: string;
+  kind: string;
+  fqn: string;
+  name: string;
+  path?: string | null;
+  package?: string | null;
+};
+
+export type GraphEdgeDto = {
+  from: string;
+  to: string;
+  rel: string;
+};
+
+export type GraphSlice = {
+  sha: string;
+  nodes: GraphNodeDto[];
+  edges: GraphEdgeDto[];
+  truncated?: boolean;
+};
+
+export type MetricsSummary = {
+  sha: string;
+  cycleCount: number;
+  packageCount: number;
+  fileCount: number;
+  avgFanIn: number;
+  avgComplexity: number;
+  totalLoc: number;
+};
+
+export type MetricSeriesResponse = {
+  repoId: string;
+  series: Array<{
+    metric: string;
+    entityId: string;
+    points: Array<{
+      commitSha: string;
+      topoIndex: number;
+      authoredAt: string | null;
+      value: number;
+    }>;
+  }>;
+};
+
+export type HeatmapResponse = {
+  sha: string;
+  metric: string;
+  view: string;
+  values: Array<{ entityId: string; value: number; fqn?: string | null; graphId?: string }>;
+};
+
+export type MetricsDeltaResponse = {
+  from: string;
+  to: string;
+  movers: Array<{
+    entityId: string;
+    entityKind: string;
+    metric: string;
+    fromValue: number;
+    toValue: number;
+    delta: number;
+  }>;
+};
+
+export type GraphDiffPayload = {
+  fromSha?: string;
+  toSha?: string;
+  nodesAdded?: GraphNodeDto[];
+  nodesRemoved?: GraphNodeDto[];
+  edgesAdded?: GraphEdgeDto[];
+  edgesRemoved?: GraphEdgeDto[];
+  highlightIds?: string[];
+  highlight_subgraph?: string[];
 };
