@@ -1,0 +1,21 @@
+{
+  "repoId": "11111111-1111-1111-1111-111111111111",
+  "fromSha": "aaa1111",
+  "toSha": "bbb2222",
+  "expect": {
+    "aaa1111": {
+      "cycle_count": 0,
+      "file_fan_out": {
+        "a.ts": 1,
+        "b.ts": 0
+      }
+    },
+    "bbb2222": {
+      "cycle_count": 1,
+      "file_fan_in": {
+        "a.ts": 1,
+        "b.ts": 1
+      }
+    }
+  }
+}

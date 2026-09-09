@@ -321,7 +321,7 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
       log.info({ sha, i, total: sampleShas.length }, 'sample parsed');
     }
 
-    await apiJson(`/v1/internal/runs/${payload.runId}/enqueue-evolve`, {
+    await apiJson(`/v1/internal/runs/${payload.runId}/enqueue-metrics`, {
       method: 'POST',
       body: {
         sampleShas,
@@ -335,7 +335,7 @@ export async function processParseCommitJob(payload: ParseCommitJobPayload) {
       progress: 100,
       commitsDone: sampleShas.length,
     });
-    log.info('parse_commit done; evolve enqueued');
+    log.info('parse_commit done; metrics enqueued');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ err: message }, 'parse_commit failed');

@@ -37,6 +37,7 @@ export const runStatusEnum = pgEnum('run_status', [
   'parsing',
   'graph_writing',
   'graph_ready',
+  'metrics_writing',
   'evolving',
   'evolution_ready',
   'failed',
@@ -50,6 +51,7 @@ export const jobTypeEnum = pgEnum('job_type', [
   'graph_write',
   'graph_write_delta',
   'checkpoint',
+  'metrics_write',
   'evolve',
 ]);
 

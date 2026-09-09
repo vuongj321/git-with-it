@@ -37,8 +37,22 @@ import {
   jobs,
   repositories,
 } from '../db/schema';
+import {
+  cacheGet,
+  cacheSet,
+  graphCacheKey,
+  metricsCacheKey,
+} from '../cache/redis-cache';
 import { queryGraphSlice } from '../graph/neo4j';
 import { JobsService } from '../jobs/jobs.service';
+import {
+  queryCycleMembers,
+  queryHeatmap,
+  queryMetricDelta,
+  queryMetricSeries,
+  querySummary,
+  queryTopMetrics,
+} from '../metrics/clickhouse';
 
 const AnalyzeBody = z.object({
   defaultBranch: z.string().min(1).optional(),
@@ -79,6 +93,45 @@ const TimelineQuery = z.object({
 const CompareBody = z.object({
   from: z.string().min(7),
   to: z.string().min(7),
+});
+
+const MetricsSeriesQuery = z.object({
+  names: z
+    .string()
+    .optional()
+    .transform((v) =>
+      (v ?? 'fan_in,fan_out,complexity_proxy,loc,cycle_count')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  entity: z.string().uuid().optional(),
+  from: z.string().min(7).optional(),
+  to: z.string().min(7).optional(),
+});
+
+const HeatmapQuery = z.object({
+  sha: z.string().min(7),
+  metric: z.string().min(1).default('fan_in'),
+  view: z.enum(['package', 'file']).default('package'),
+});
+
+const SummaryQuery = z.object({
+  sha: z.string().min(7).optional(),
+});
+
+const MetricsDeltaQuery = z.object({
+  from: z.string().min(7),
+  to: z.string().min(7),
+  metric: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+const TopMetricsQuery = z.object({
+  sha: z.string().min(7),
+  metric: z.string().min(1).default('fan_in'),
+  view: z.enum(['package', 'file']).default('package'),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
 @ApiTags('repos')
@@ -211,18 +264,166 @@ export class ReposController {
       .where(and(eq(commits.repoId, repo.id), eq(commits.sha, sha)))
       .limit(1);
 
+    const cacheKey = graphCacheKey(repo.id, sha, parsed.view, 'root', '0');
+    const cached = await cacheGet<unknown>(cacheKey);
+    if (cached) return cached;
+
     try {
-      return await queryGraphSlice({
+      const slice = await queryGraphSlice({
         repoId: repo.id,
         sha,
         topoIndex: commit?.topoIndex ?? null,
         view: parsed.view,
         maxNodes: parsed.limit,
       });
+      await cacheSet(cacheKey, slice, 120);
+      return slice;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new BadRequestException(`graph query failed: ${message}`);
     }
+  }
+
+  @Get(':id/metrics')
+  async metricsSeries(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = MetricsSeriesQuery.parse(query);
+    const range = `${parsed.from ?? ''}:${parsed.to ?? ''}`;
+    const cacheKey = metricsCacheKey(
+      repo.id,
+      parsed.entity ?? 'all',
+      parsed.names.join(','),
+      range,
+    );
+    const cached = await cacheGet<unknown>(cacheKey);
+    if (cached) return cached;
+
+    let fromTopo: number | undefined;
+    let toTopo: number | undefined;
+    if (parsed.from) {
+      const [c] = await db
+        .select()
+        .from(commits)
+        .where(and(eq(commits.repoId, repo.id), eq(commits.sha, parsed.from)))
+        .limit(1);
+      fromTopo = c?.topoIndex ?? undefined;
+    }
+    if (parsed.to) {
+      const [c] = await db
+        .select()
+        .from(commits)
+        .where(and(eq(commits.repoId, repo.id), eq(commits.sha, parsed.to)))
+        .limit(1);
+      toTopo = c?.topoIndex ?? undefined;
+    }
+
+    const series = await queryMetricSeries({
+      repoId: repo.id,
+      names: parsed.names,
+      entityId: parsed.entity,
+      fromTopo,
+      toTopo,
+    });
+    const payload = { repoId: repo.id, series };
+    await cacheSet(cacheKey, payload, 300);
+    return payload;
+  }
+
+  @Get(':id/metrics/heatmap')
+  async metricsHeatmap(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = HeatmapQuery.parse(query);
+    const cacheKey = metricsCacheKey(
+      repo.id,
+      parsed.view,
+      parsed.metric,
+      `heatmap:${parsed.sha}`,
+    );
+    const cached = await cacheGet<unknown>(cacheKey);
+    if (cached) return cached;
+    const values = await queryHeatmap({
+      repoId: repo.id,
+      sha: parsed.sha,
+      metric: parsed.metric,
+      view: parsed.view,
+    });
+    const payload = { sha: parsed.sha, metric: parsed.metric, view: parsed.view, values };
+    await cacheSet(cacheKey, payload, 300);
+    return payload;
+  }
+
+  @Get(':id/metrics/summary')
+  async metricsSummary(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = SummaryQuery.parse(query);
+    const sha = parsed.sha ?? repo.lastSyncedSha;
+    if (!sha) throw new BadRequestException('sha required');
+    const cacheKey = metricsCacheKey(repo.id, 'repo', 'summary', sha);
+    const cached = await cacheGet<unknown>(cacheKey);
+    if (cached) return cached;
+    const summary = await querySummary({ repoId: repo.id, sha });
+    await cacheSet(cacheKey, summary, 300);
+    return summary;
+  }
+
+  @Get(':id/metrics/delta')
+  async metricsDelta(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = MetricsDeltaQuery.parse(query);
+    const movers = await queryMetricDelta({
+      repoId: repo.id,
+      fromSha: parsed.from,
+      toSha: parsed.to,
+      metric: parsed.metric,
+      limit: parsed.limit,
+    });
+    return { from: parsed.from, to: parsed.to, movers };
+  }
+
+  @Get(':id/metrics/top')
+  async metricsTop(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query() query: Record<string, string>,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = TopMetricsQuery.parse(query);
+    const values = await queryTopMetrics({
+      repoId: repo.id,
+      sha: parsed.sha,
+      metric: parsed.metric,
+      view: parsed.view,
+      limit: parsed.limit,
+    });
+    return { sha: parsed.sha, metric: parsed.metric, view: parsed.view, values };
+  }
+
+  @Get(':id/metrics/cycles')
+  async metricsCycles(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Query('sha') sha: string,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    if (!sha) throw new BadRequestException('sha required');
+    const members = await queryCycleMembers({ repoId: repo.id, sha });
+    return { sha, members };
   }
 
   @Get(':id/graph/diff')

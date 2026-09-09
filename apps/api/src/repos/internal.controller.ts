@@ -42,6 +42,9 @@ import {
   writeTemporalSnapshot,
 } from '../graph/neo4j';
 import { JobsService } from '../jobs/jobs.service';
+import { writeMetricRows } from '../metrics/clickhouse';
+import { invalidateRepoCaches } from '../cache/redis-cache';
+import type { MetricRow } from '@gwi/shared-types';
 
 const UpdateRunBody = z.object({
   status: AnalysisRunStatus,
@@ -82,6 +85,26 @@ const EnqueueParseCommitsBody = z.object({
 const EnqueueEvolveBody = z.object({
   sampleShas: z.array(z.string().min(7)).min(1),
   sampleConfig: SampleConfigSchema.partial().optional(),
+});
+
+const EnqueueMetricsBody = z.object({
+  sampleShas: z.array(z.string().min(7)).min(1),
+  sampleConfig: SampleConfigSchema.partial().optional(),
+});
+
+const MetricsWriteBody = z.object({
+  rows: z.array(
+    z.object({
+      repoId: z.string().uuid(),
+      commitSha: z.string().min(7),
+      topoIndex: z.number().int().min(0),
+      authoredAt: z.string().nullable().optional(),
+      entityId: z.string().uuid(),
+      entityKind: z.string().min(1),
+      metric: z.string().min(1),
+      value: z.number(),
+    }),
+  ),
 });
 
 const EnqueueGraphBody = z.object({
@@ -262,6 +285,7 @@ export class InternalController {
       parsed.status === 'enumerating' ||
       parsed.status === 'parsing' ||
       parsed.status === 'graph_writing' ||
+      parsed.status === 'metrics_writing' ||
       parsed.status === 'evolving'
     ) {
       runPatch.startedAt = now;
@@ -286,6 +310,10 @@ export class InternalController {
 
     if (!run) {
       throw new NotFoundException('Run not found');
+    }
+
+    if (parsed.status === 'evolution_ready' || parsed.status === 'failed') {
+      await invalidateRepoCaches(run.repoId);
     }
 
     const repoPatch: Record<string, unknown> = { updatedAt: now };
@@ -468,6 +496,61 @@ export class InternalController {
     });
 
     return { ok: true, jobId: job!.id };
+  }
+
+  @Post('runs/:runId/enqueue-metrics')
+  async enqueueMetrics(@Param('runId') runId: string, @Body() body: unknown) {
+    const parsed = EnqueueMetricsBody.parse(body);
+    const { run, repo } = await this.requireRunRepo(runId);
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        type: 'metrics_write',
+        status: 'queued',
+        orgId: repo.orgId,
+        repoId: repo.id,
+        runId: run.id,
+        progress: 0,
+        payload: { sampleShas: parsed.sampleShas },
+      })
+      .returning();
+
+    await db
+      .update(analysisRuns)
+      .set({ status: 'metrics_writing', finishedAt: null })
+      .where(eq(analysisRuns.id, runId));
+
+    await this.jobsService.enqueueMetricsWrite({
+      jobId: job!.id,
+      runId: run.id,
+      repoId: repo.id,
+      orgId: repo.orgId,
+      sampleShas: parsed.sampleShas,
+      sampleConfig: parsed.sampleConfig,
+    });
+
+    return { ok: true, jobId: job!.id };
+  }
+
+  @Post('repos/:repoId/metrics/write')
+  async writeMetrics(@Param('repoId') repoId: string, @Body() body: unknown) {
+    await this.requireRepo(repoId);
+    const parsed = MetricsWriteBody.parse(body);
+    const rows = parsed.rows.map(
+      (r): MetricRow => ({
+        repoId: r.repoId,
+        commitSha: r.commitSha,
+        topoIndex: r.topoIndex,
+        authoredAt: r.authoredAt ?? null,
+        entityId: r.entityId,
+        entityKind: r.entityKind,
+        metric: r.metric as MetricRow['metric'],
+        value: r.value,
+      }),
+    );
+    const result = await writeMetricRows(rows);
+    return { ok: true, ...result };
   }
 
   @Post('runs/:runId/enqueue-graph-write')

@@ -12,6 +12,10 @@ const EnvSchema = z.object({
   NEO4J_URI: z.string().default('bolt://localhost:7687'),
   NEO4J_USER: z.string().default('neo4j'),
   NEO4J_PASSWORD: z.string().default('gwi-local-dev'),
+  CLICKHOUSE_URL: z.string().default('http://localhost:8123'),
+  CLICKHOUSE_USER: z.string().default('default'),
+  CLICKHOUSE_PASSWORD: z.string().default(''),
+  CLICKHOUSE_DATABASE: z.string().default('default'),
 });
 
 function loadEnv() {
@@ -30,6 +34,10 @@ function loadEnv() {
     NEO4J_URI: process.env.NEO4J_URI,
     NEO4J_USER: process.env.NEO4J_USER,
     NEO4J_PASSWORD: process.env.NEO4J_PASSWORD,
+    CLICKHOUSE_URL: process.env.CLICKHOUSE_URL,
+    CLICKHOUSE_USER: process.env.CLICKHOUSE_USER,
+    CLICKHOUSE_PASSWORD: process.env.CLICKHOUSE_PASSWORD,
+    CLICKHOUSE_DATABASE: process.env.CLICKHOUSE_DATABASE,
   });
   if (!parsed.success) {
     console.error(parsed.error.flatten());

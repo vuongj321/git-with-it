@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   CreateRepoBodySchema,
+  computeMetrics,
   diffGraphs,
   entityId,
   eventsFromDiff,
@@ -12,6 +16,11 @@ import {
   type GraphSnapshot,
   type WalkedCommit,
 } from './index';
+
+const goldensDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../testdata/goldens',
+);
 
 describe('isLikelyGitRemoteUrl', () => {
   it('accepts https github urls', () => {
@@ -182,5 +191,78 @@ describe('rename_detected golden', () => {
     expect(diff.nodesRemoved).toHaveLength(0);
     const events = eventsFromDiff(diff);
     expect(events.some((e) => e.type === 'rename_detected')).toBe(true);
+  });
+});
+
+describe('metrics-cycle golden', () => {
+  it('matches fan_in/out and cycle_count at two SHAs', () => {
+    const golden = JSON.parse(
+      readFileSync(path.join(goldensDir, 'metrics-cycle.json'), 'utf8'),
+    ) as {
+      repoId: string;
+      expect: Record<
+        string,
+        {
+          cycle_count: number;
+          file_fan_out?: Record<string, number>;
+          file_fan_in?: Record<string, number>;
+        }
+      >;
+    };
+
+    const from: GraphSnapshot = {
+      sha: 'aaa1111',
+      nodes: [
+        { id: 'file:a.ts', kind: 'file', fqn: 'a.ts', name: 'a.ts' },
+        { id: 'file:b.ts', kind: 'file', fqn: 'b.ts', name: 'b.ts' },
+      ],
+      edges: [{ from: 'file:a.ts', to: 'file:b.ts', rel: 'DEPENDS_ON' }],
+    };
+    const to: GraphSnapshot = {
+      sha: 'bbb2222',
+      nodes: from.nodes,
+      edges: [
+        { from: 'file:a.ts', to: 'file:b.ts', rel: 'DEPENDS_ON' },
+        { from: 'file:b.ts', to: 'file:a.ts', rel: 'DEPENDS_ON' },
+      ],
+    };
+
+    const rowsA = computeMetrics({
+      repoId: golden.repoId,
+      snapshot: from,
+      topoIndex: 0,
+    });
+    const rowsB = computeMetrics({
+      repoId: golden.repoId,
+      snapshot: to,
+      topoIndex: 1,
+    });
+
+    expect(
+      rowsA.find((r) => r.metric === 'cycle_count' && r.entityKind === 'repo')
+        ?.value,
+    ).toBe(golden.expect.aaa1111.cycle_count);
+    expect(
+      rowsB.find((r) => r.metric === 'cycle_count' && r.entityKind === 'repo')
+        ?.value,
+    ).toBe(golden.expect.bbb2222.cycle_count);
+
+    const fanOutA = (fqn: string) =>
+      rowsA.find(
+        (r) =>
+          r.metric === 'fan_out' &&
+          r.entityId === entityId(golden.repoId, 'file', fqn),
+      )?.value;
+    const fanInB = (fqn: string) =>
+      rowsB.find(
+        (r) =>
+          r.metric === 'fan_in' &&
+          r.entityId === entityId(golden.repoId, 'file', fqn),
+      )?.value;
+
+    expect(fanOutA('a.ts')).toBe(golden.expect.aaa1111.file_fan_out!['a.ts']);
+    expect(fanOutA('b.ts')).toBe(golden.expect.aaa1111.file_fan_out!['b.ts']);
+    expect(fanInB('a.ts')).toBe(golden.expect.bbb2222.file_fan_in!['a.ts']);
+    expect(fanInB('b.ts')).toBe(golden.expect.bbb2222.file_fan_in!['b.ts']);
   });
 });

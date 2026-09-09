@@ -4,6 +4,7 @@ import {
   EnumerateSampleJobPayloadSchema,
   EvolveJobPayloadSchema,
   GraphWriteJobPayloadSchema,
+  MetricsWriteJobPayloadSchema,
   ParseCommitJobPayloadSchema,
   ParseJobPayloadSchema,
 } from '@gwi/shared-types';
@@ -13,6 +14,7 @@ import { env } from './env';
 import { processEvolveJob } from './evolve';
 import { processGraphWriteJob } from './graph-write';
 import { logger } from './logger';
+import { processMetricsWriteJob } from './metrics-write';
 import { processParseCommitJob } from './parse-commit';
 import { processParseJob } from './parse';
 
@@ -64,6 +66,15 @@ const graphWorker = new Worker(
   { connection, concurrency: 1 },
 );
 
+const metricsWorker = new Worker(
+  'metrics_write',
+  async (job) => {
+    const payload = MetricsWriteJobPayloadSchema.parse(job.data);
+    await processMetricsWriteJob(payload);
+  },
+  { connection, concurrency: 1 },
+);
+
 const evolveWorker = new Worker(
   'evolve',
   async (job) => {
@@ -79,6 +90,7 @@ for (const [name, worker] of [
   ['parse', parseWorker],
   ['parse_commit', parseCommitWorker],
   ['graph_write', graphWorker],
+  ['metrics_write', metricsWorker],
   ['evolve', evolveWorker],
 ] as const) {
   worker.on('ready', () => logger.info({ queue: name }, 'worker ready'));
@@ -98,6 +110,7 @@ async function shutdown() {
     parseWorker.close(),
     parseCommitWorker.close(),
     graphWorker.close(),
+    metricsWorker.close(),
     evolveWorker.close(),
   ]);
   process.exit(0);

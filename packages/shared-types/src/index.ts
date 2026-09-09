@@ -9,6 +9,7 @@ export const AnalysisRunStatus = z.enum([
   'parsing',
   'graph_writing',
   'graph_ready',
+  'metrics_writing',
   'evolving',
   'evolution_ready',
   'failed',
@@ -31,6 +32,7 @@ export const JobType = z.enum([
   'graph_write',
   'graph_write_delta',
   'checkpoint',
+  'metrics_write',
   'evolve',
 ]);
 export type JobType = z.infer<typeof JobType>;
@@ -164,6 +166,16 @@ export const GraphWriteJobPayloadSchema = z.object({
   analyzerVersion: z.string().min(1),
 });
 export type GraphWriteJobPayload = z.infer<typeof GraphWriteJobPayloadSchema>;
+
+export const MetricsWriteJobPayloadSchema = z.object({
+  jobId: z.string().uuid(),
+  runId: z.string().uuid(),
+  repoId: z.string().uuid(),
+  orgId: z.string().uuid(),
+  sampleShas: z.array(z.string().min(7)).min(1),
+  sampleConfig: SampleConfigSchema.partial().optional(),
+});
+export type MetricsWriteJobPayload = z.infer<typeof MetricsWriteJobPayloadSchema>;
 
 export const EvolveJobPayloadSchema = z.object({
   jobId: z.string().uuid(),
@@ -337,3 +349,16 @@ export {
   type EventRuleConfig,
   type EvolutionEventDraft,
 } from './evolution-events';
+
+export {
+  METRIC_NAMES,
+  computeMetrics,
+  complexityProxyFromSource,
+  maintainabilityProxy,
+  summarizeMetrics,
+  type MetricName,
+  type MetricRow,
+  type FileStat,
+  type ComputeMetricsInput,
+  type MetricsSummary,
+} from './metrics';
