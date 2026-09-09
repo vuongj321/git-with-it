@@ -58,6 +58,8 @@ const EnvSchema = z.object({
     .string()
     .optional()
     .transform((v) => v !== 'false'),
+  /** Nest JSON body limit (worker internal posts can exceed the Express default ~100kb). */
+  BODY_JSON_LIMIT: z.string().default('10mb'),
 });
 
 function loadEnv() {
@@ -86,6 +88,7 @@ function loadEnv() {
     S3_BUCKET: process.env.S3_BUCKET,
     S3_REGION: process.env.S3_REGION,
     S3_FORCE_PATH_STYLE: process.env.S3_FORCE_PATH_STYLE,
+    BODY_JSON_LIMIT: process.env.BODY_JSON_LIMIT,
   });
   if (!parsed.success) {
     console.error(parsed.error.flatten());

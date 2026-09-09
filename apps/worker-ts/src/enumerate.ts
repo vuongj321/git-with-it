@@ -5,7 +5,7 @@ import {
   sampleFirstParentCommits,
   type WalkedCommit,
 } from '@gwi/shared-types';
-import { apiJson, patchRun } from './api';
+import { apiJson, chunkArray, patchRun } from './api';
 import { openBareFromCloneUri } from './bare';
 import { gwiGit } from './git';
 import { logger } from './logger';
@@ -80,24 +80,31 @@ export async function processEnumerateSampleJob(
       'sampled first-parent history',
     );
 
-    await apiJson(`/v1/internal/repos/${payload.repoId}/commits/upsert`, {
-      method: 'POST',
-      body: {
-        runId: payload.runId,
-        commits: walked.map((c) => ({
-          sha: c.sha,
-          parentShas: c.parentShas,
-          authoredAt: c.authoredAt?.toISOString() ?? null,
-          message: c.message,
-        })),
-        samples: samples.map((s) => ({
-          sha: s.sha,
-          topoIndex: s.topoIndex,
-          reason: s.reason,
-        })),
-        sampleConfig: config,
-      },
-    });
+    const commitPayload = walked.map((c) => ({
+      sha: c.sha,
+      parentShas: c.parentShas,
+      authoredAt: c.authoredAt?.toISOString() ?? null,
+      message: c.message,
+    }));
+    const samplePayload = samples.map((s) => ({
+      sha: s.sha,
+      topoIndex: s.topoIndex,
+      reason: s.reason,
+    }));
+
+    // Large histories can exceed Nest’s JSON body limit — chunk commits.
+    const commitBatches = chunkArray(commitPayload, 400);
+    for (let i = 0; i < commitBatches.length; i++) {
+      await apiJson(`/v1/internal/repos/${payload.repoId}/commits/upsert`, {
+        method: 'POST',
+        body: {
+          runId: payload.runId,
+          commits: commitBatches[i],
+          samples: i === 0 ? samplePayload : [],
+          sampleConfig: i === 0 ? config : undefined,
+        },
+      });
+    }
 
     const sampleShas = samples.map((s) => s.sha);
 

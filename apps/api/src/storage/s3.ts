@@ -88,14 +88,25 @@ export async function loadGraphSnapshot(
   sha: string,
   artifactUri?: string | null,
 ): Promise<GraphSnapshot> {
-  const key = artifactUri?.trim()
-    ? keyFromArtifactUri(artifactUri)
-    : snapshotKey(repoId, sha);
-  const snap = await downloadJsonObject<GraphSnapshot>(key);
-  if (!Array.isArray(snap.nodes) || !Array.isArray(snap.edges)) {
-    throw new Error(`invalid graph snapshot at ${key}`);
+  const candidates = artifactUri?.trim()
+    ? [keyFromArtifactUri(artifactUri)]
+    : [snapshotKey(repoId, sha), `graphs/${repoId}/snapshots/${sha}.json`];
+
+  let lastErr: unknown;
+  for (const key of candidates) {
+    try {
+      const snap = await downloadJsonObject<GraphSnapshot>(key);
+      if (!Array.isArray(snap.nodes) || !Array.isArray(snap.edges)) {
+        throw new Error(`invalid graph snapshot at ${key}`);
+      }
+      return snap;
+    } catch (err) {
+      lastErr = err;
+    }
   }
-  return snap;
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error(`graph snapshot not found for ${repoId}@${sha}`);
 }
 
 export async function loadGraphDiff(artifactUri: string): Promise<GraphDiff> {

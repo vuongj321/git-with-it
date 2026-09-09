@@ -6,7 +6,7 @@ import {
   eventsFromDiff,
   type GraphSnapshot,
 } from '@gwi/shared-types';
-import { apiJson, patchRun } from './api';
+import { apiJson, chunkArray, patchRun } from './api';
 import { logger } from './logger';
 import { createS3, downloadBuffer, ensureBucket } from './s3';
 
@@ -61,19 +61,22 @@ export async function processEvolveJob(payload: EvolveJobPayload) {
         couplingDeltaThreshold: config.couplingDeltaThreshold,
       });
       const events = eventsFromDiff(diff, {
+        repoId: payload.repoId,
         couplingDeltaThreshold: config.couplingDeltaThreshold,
       });
 
       if (events.length) {
-        await apiJson(`/v1/internal/repos/${payload.repoId}/evolution-events`, {
-          method: 'POST',
-          body: {
-            runId: payload.runId,
-            fromSha,
-            toSha,
-            events,
-          },
-        });
+        for (const batch of chunkArray(events, 40)) {
+          await apiJson(`/v1/internal/repos/${payload.repoId}/evolution-events`, {
+            method: 'POST',
+            body: {
+              runId: payload.runId,
+              fromSha,
+              toSha,
+              events: batch,
+            },
+          });
+        }
       }
 
       await patchRun(payload.runId, {

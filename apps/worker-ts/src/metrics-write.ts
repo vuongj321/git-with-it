@@ -1,22 +1,20 @@
-import type { GraphSnapshot, MetricsWriteJobPayload } from '@gwi/shared-types';
-import { SampleConfigSchema, computeMetrics } from '@gwi/shared-types';
+import type { MetricsWriteJobPayload } from '@gwi/shared-types';
+import { SampleConfigSchema } from '@gwi/shared-types';
 import { apiJson, patchRun } from './api';
 import { logger } from './logger';
-import { createS3, downloadBuffer, objectExists } from './s3';
+import { createS3, objectExists } from './s3';
 
-async function loadSnapshot(
+async function resolveSnapshotUri(
   s3: ReturnType<typeof createS3>,
   repoId: string,
   sha: string,
-): Promise<GraphSnapshot | null> {
+): Promise<string | null> {
   const keys = [
     `repos/${repoId}/graphs/${sha}.json`,
     `graphs/${repoId}/snapshots/${sha}.json`,
   ];
   for (const key of keys) {
-    if (!(await objectExists(s3, key))) continue;
-    const buf = await downloadBuffer(s3, key);
-    return JSON.parse(buf.toString('utf8')) as GraphSnapshot;
+    if (await objectExists(s3, key)) return key;
   }
   return null;
 }
@@ -41,30 +39,32 @@ export async function processMetricsWriteJob(payload: MetricsWriteJobPayload) {
 
     for (let i = 0; i < sampleShas.length; i++) {
       const sha = sampleShas[i]!;
-      const snapshot = await loadSnapshot(s3, payload.repoId, sha);
-      if (!snapshot) {
+      const artifactUri = await resolveSnapshotUri(s3, payload.repoId, sha);
+      if (!artifactUri) {
         log.warn({ sha }, 'snapshot missing; skipping metrics');
         continue;
       }
 
-      const rows = computeMetrics({
-        repoId: payload.repoId,
-        snapshot,
-        topoIndex: i,
-        authoredAt: null,
-      });
-
-      await apiJson(`/v1/internal/repos/${payload.repoId}/metrics/write`, {
-        method: 'POST',
-        body: { rows },
-      });
+      // API loads the graph from MinIO and computes metrics (avoids 413 on large row payloads).
+      const result = await apiJson<{ ok: boolean; inserted: number }>(
+        `/v1/internal/repos/${payload.repoId}/metrics/write`,
+        {
+          method: 'POST',
+          body: {
+            sha,
+            topoIndex: i,
+            authoredAt: null,
+            artifactUri,
+          },
+        },
+      );
 
       await patchRun(payload.runId, {
         status: 'metrics_writing',
         commitsDone: i + 1,
         progress: Math.round(((i + 1) / sampleShas.length) * 100),
       });
-      log.info({ sha, rows: rows.length }, 'metrics written');
+      log.info({ sha, inserted: result.inserted }, 'metrics written');
     }
 
     await apiJson(`/v1/internal/runs/${payload.runId}/enqueue-evolve`, {

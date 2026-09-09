@@ -470,9 +470,13 @@ export function isLikelyGitRemoteUrl(url: string): boolean {
 export {
   ANALYZER_VERSION,
   entityId,
+  graphRefToEntityId,
+  isEntityUuid,
+  kindForEntityId,
   GWI_ENTITY_NAMESPACE,
   uuidv5,
   type EntityKindForId,
+  type GraphEntityRef,
 } from './entity-id';
 
 export {

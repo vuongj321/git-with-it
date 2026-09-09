@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { json, urlencoded } from 'express';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { env } from './config/env';
@@ -13,7 +14,13 @@ async function bootstrap() {
     );
   }
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    bodyParser: false,
+  });
+  // Worker internal posts (insights evidence, commit walks, …) exceed Express’s ~100kb default.
+  app.use(json({ limit: env.BODY_JSON_LIMIT }));
+  app.use(urlencoded({ limit: env.BODY_JSON_LIMIT, extended: true }));
   app.useLogger(app.get(Logger));
   app.enableCors({
     origin: env.WEB_ORIGIN,

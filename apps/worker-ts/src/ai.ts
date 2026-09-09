@@ -6,8 +6,8 @@ import type {
   InsightOutput,
   InsightSignal,
 } from '@gwi/shared-types';
-import { EvidenceBundleSchema, InsightOutputSchema } from '@gwi/shared-types';
-import { apiJson, patchRun } from './api';
+import { EvidenceBundleSchema, InsightOutputSchema, graphRefToEntityId, isEntityUuid } from '@gwi/shared-types';
+import { apiJson, chunkArray, patchRun } from './api';
 import { env } from './env';
 import { logger } from './logger';
 
@@ -532,16 +532,21 @@ export async function processAiGenerateJob(payload: AiGenerateJobPayload) {
 
     const candidates: InsightCandidate[] = [];
     for (const event of events) {
-      if (!event.entityIds?.length) continue;
+      const entityIds = [
+        ...new Set(
+          (event.entityIds ?? []).map((id) => graphRefToEntityId(payload.repoId, id)),
+        ),
+      ].filter(isEntityUuid);
+      if (!entityIds.length) continue;
       if (severityWeight(event.severity) < severityWeight('medium')) continue;
       candidates.push({
         id: `event:${event.id}`,
         type: 'evolution_event',
         title: event.title,
-        entityIds: event.entityIds,
+        entityIds,
         fromSha: event.fromSha,
         toSha: event.toSha,
-        score: severityWeight(event.severity) * 20 + ((event.entityIds?.length ?? 1) === 1 ? 8 : 0),
+        score: severityWeight(event.severity) * 20 + (entityIds.length === 1 ? 8 : 0),
         signalRefs: [`event:${event.id}`],
       });
     }
@@ -597,10 +602,15 @@ export async function processAiGenerateJob(payload: AiGenerateJobPayload) {
       return;
     }
 
-    const entityIds = [...new Set(selected.flatMap((candidate) => candidate.entityIds))];
-    const entities = await apiJson<RepoEntity[]>(
-      `/v1/repos/${payload.repoId}/entities?orgId=${payload.orgId}&ids=${entityIds.join(',')}&limit=${entityIds.length}`,
-    );
+    const entityIds = [
+      ...new Set(selected.flatMap((candidate) => candidate.entityIds)),
+    ].filter(isEntityUuid);
+    const entities =
+      entityIds.length === 0
+        ? []
+        : await apiJson<RepoEntity[]>(
+            `/v1/repos/${payload.repoId}/entities?orgId=${payload.orgId}&ids=${entityIds.join(',')}&limit=${entityIds.length}`,
+          );
     const entityMap = new Map(entities.map((entity) => [entity.id, entity]));
 
     const evidence: Array<{ evidenceHash: string; bundle: EvidenceBundle }> = [];
@@ -715,17 +725,24 @@ export async function processAiGenerateJob(payload: AiGenerateJobPayload) {
       });
     }
 
-    await apiJson(`/v1/internal/repos/${payload.repoId}/insights/batch-upsert`, {
-      method: 'POST',
-      body: {
-        runId: payload.runId,
-        analyzerVersion: null,
-        providerState: aiEnabled ? 'published' : 'skipped_no_provider',
-        evidence,
-        candidates: candidateRows,
-        insights: insightRows,
-      },
-    });
+    // Evidence bundles are large — post in small batches to stay under body limits.
+    const evidenceBatches = chunkArray(evidence, 2);
+    for (const evBatch of evidenceBatches) {
+      const hashes = new Set(evBatch.map((item) => item.evidenceHash));
+      await apiJson(`/v1/internal/repos/${payload.repoId}/insights/batch-upsert`, {
+        method: 'POST',
+        body: {
+          runId: payload.runId,
+          analyzerVersion: null,
+          providerState: aiEnabled ? 'published' : 'skipped_no_provider',
+          evidence: evBatch,
+          candidates: candidateRows.filter(
+            (row) => row.evidenceHash && hashes.has(row.evidenceHash),
+          ),
+          insights: insightRows.filter((row) => hashes.has(row.evidenceHash)),
+        },
+      });
+    }
 
     await patchRun(payload.runId, {
       status: 'evolution_ready',

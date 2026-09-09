@@ -22,6 +22,9 @@ export type EntityKindForId =
   | 'method'
   | 'variable';
 
+const ENTITY_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function uuidToBytes(uuid: string): Buffer {
   const hex = uuid.replace(/-/g, '');
   if (hex.length !== 32) throw new Error(`invalid uuid: ${uuid}`);
@@ -48,6 +51,51 @@ export function uuidv5(name: string, namespace: string = GWI_ENTITY_NAMESPACE): 
 /** Stable entity id: UUIDv5(namespace, `${repoId}:${kind}:${fqn}`). */
 export function entityId(repoId: string, kind: EntityKindForId, fqn: string): string {
   return uuidv5(`${repoId}:${kind}:${fqn}`);
+}
+
+/** True when value looks like a Postgres uuid suitable for `entities.id`. */
+export function isEntityUuid(value: string): boolean {
+  return ENTITY_UUID_RE.test(value);
+}
+
+export function kindForEntityId(kind: string): EntityKindForId {
+  if (kind === 'package') return 'package';
+  if (kind === 'file') return 'file';
+  if (kind === 'class') return 'class';
+  if (kind === 'interface') return 'interface';
+  if (kind === 'function') return 'function';
+  if (kind === 'method') return 'method';
+  return 'variable';
+}
+
+export type GraphEntityRef =
+  | string
+  | {
+      id: string;
+      kind: string;
+      fqn: string;
+    };
+
+/**
+ * Map a graph-local node id (`file:…`, `pkg:…`, `sym:…`) or node object to the
+ * stable product entity UUID. Already-UUID refs are returned unchanged.
+ */
+export function graphRefToEntityId(repoId: string, ref: GraphEntityRef): string {
+  if (typeof ref !== 'string') {
+    return entityId(repoId, kindForEntityId(ref.kind), ref.fqn);
+  }
+  if (isEntityUuid(ref)) return ref;
+  if (ref.startsWith('file:')) {
+    return entityId(repoId, 'file', ref.slice('file:'.length));
+  }
+  if (ref.startsWith('pkg:')) {
+    return entityId(repoId, 'package', ref.slice('pkg:'.length));
+  }
+  if (ref.startsWith('sym:')) {
+    // Symbol kind is not encoded in the id; prefer a GraphNode when available.
+    return entityId(repoId, 'function', ref.slice('sym:'.length));
+  }
+  return entityId(repoId, 'file', ref);
 }
 
 /** Current analyzer_version stamped on parse artifacts / appearances. */

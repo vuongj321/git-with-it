@@ -17,6 +17,7 @@ import {
   CreateRepoBodySchema,
   SampleConfigSchema,
   diffGraphs,
+  isEntityUuid,
   isLikelyGitRemoteUrl,
   type GraphSnapshot,
 } from '@gwi/shared-types';
@@ -637,14 +638,15 @@ export class ReposController {
     const repo = await this.requireRepo(id, orgId);
     const parsed = EntitiesQuery.parse(query);
     const limit = parsed.limit;
-    const rows = parsed.ids.length
+    const ids = parsed.ids.filter(isEntityUuid);
+    const rows = ids.length
       ? (await db
           .select()
           .from(entities)
           .where(
             and(
               eq(entities.repoId, repo.id),
-              or(...parsed.ids.map((value) => eq(entities.id, value))),
+              or(...ids.map((value) => eq(entities.id, value))),
             ),
           )
           .limit(limit))
@@ -663,7 +665,9 @@ export class ReposController {
           )
           .orderBy(entities.fqn)
           .limit(limit)
-      : await db
+      : parsed.ids.length
+        ? []
+        : await db
           .select()
           .from(entities)
           .where(eq(entities.repoId, repo.id))

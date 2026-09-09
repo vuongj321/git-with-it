@@ -11,6 +11,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   ANALYZER_VERSION,
   AnalysisRunStatus,
+  computeMetrics,
   type EvidenceBundle,
   entityId,
   EntityKind,
@@ -20,6 +21,7 @@ import {
   InsightSeverity,
   InsightStatus,
   JobStatus,
+  type MetricRow,
   RepositoryStatus,
   SampleConfigSchema,
   type EntityKindForId,
@@ -52,7 +54,6 @@ import { JobsService } from '../jobs/jobs.service';
 import { writeMetricRows } from '../metrics/clickhouse';
 import { invalidateRepoCaches } from '../cache/redis-cache';
 import { loadGraphDiff, loadGraphSnapshot } from '../storage/s3';
-import type { MetricRow } from '@gwi/shared-types';
 
 const UpdateRunBody = z.object({
   status: AnalysisRunStatus,
@@ -105,20 +106,35 @@ const EnqueueMetricsBody = z.object({
   sampleConfig: SampleConfigSchema.partial().optional(),
 });
 
-const MetricsWriteBody = z.object({
-  rows: z.array(
-    z.object({
-      repoId: z.string().uuid(),
-      commitSha: z.string().min(7),
-      topoIndex: z.number().int().min(0),
-      authoredAt: z.string().nullable().optional(),
-      entityId: z.string().uuid(),
-      entityKind: z.string().min(1),
-      metric: z.string().min(1),
-      value: z.number(),
-    }),
-  ),
+const MetricRowBody = z.object({
+  repoId: z.string().uuid(),
+  commitSha: z.string().min(7),
+  topoIndex: z.number().int().min(0),
+  authoredAt: z.string().nullable().optional(),
+  entityId: z.string().uuid(),
+  entityKind: z.string().min(1),
+  metric: z.string().min(1),
+  value: z.number(),
 });
+
+/** Prefer MinIO graph artifact; inline rows kept for small fixtures / backwards compat. */
+const MetricsWriteBody = z
+  .object({
+    sha: z.string().min(7).optional(),
+    topoIndex: z.number().int().min(0).optional(),
+    authoredAt: z.string().nullable().optional(),
+    artifactUri: z.string().min(1).optional(),
+    rows: z.array(MetricRowBody).optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.rows && val.rows.length > 0) return;
+    if (!val.sha || val.topoIndex == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'sha+topoIndex (artifactUri optional) or rows required',
+      });
+    }
+  });
 
 const EnqueueGraphBody = z.object({
   commitSha: z.string().min(7),
@@ -235,13 +251,15 @@ const CommitsUpsertBody = z.object({
       message: z.string().nullable().optional(),
     }),
   ),
-  samples: z.array(
-    z.object({
-      sha: z.string().min(7),
-      topoIndex: z.number().int(),
-      reason: z.string(),
-    }),
-  ),
+  samples: z
+    .array(
+      z.object({
+        sha: z.string().min(7),
+        topoIndex: z.number().int(),
+        reason: z.string(),
+      }),
+    )
+    .default([]),
   sampleConfig: z.record(z.unknown()).optional(),
 });
 
@@ -638,18 +656,33 @@ export class InternalController {
   async writeMetrics(@Param('repoId') repoId: string, @Body() body: unknown) {
     await this.requireRepo(repoId);
     const parsed = MetricsWriteBody.parse(body);
-    const rows = parsed.rows.map(
-      (r): MetricRow => ({
-        repoId: r.repoId,
-        commitSha: r.commitSha,
-        topoIndex: r.topoIndex,
-        authoredAt: r.authoredAt ?? null,
-        entityId: r.entityId,
-        entityKind: r.entityKind,
-        metric: r.metric as MetricRow['metric'],
-        value: r.value,
-      }),
-    );
+
+    let rows: MetricRow[];
+    if (parsed.rows && parsed.rows.length > 0) {
+      rows = parsed.rows.map(
+        (r): MetricRow => ({
+          repoId: r.repoId,
+          commitSha: r.commitSha,
+          topoIndex: r.topoIndex,
+          authoredAt: r.authoredAt ?? null,
+          entityId: r.entityId,
+          entityKind: r.entityKind,
+          metric: r.metric as MetricRow['metric'],
+          value: r.value,
+        }),
+      );
+    } else {
+      const sha = parsed.sha!;
+      const topoIndex = parsed.topoIndex!;
+      const snapshot = await loadGraphSnapshot(repoId, sha, parsed.artifactUri);
+      rows = computeMetrics({
+        repoId,
+        snapshot,
+        topoIndex,
+        authoredAt: parsed.authoredAt ?? null,
+      });
+    }
+
     const result = await writeMetricRows(rows);
     return { ok: true, ...result };
   }
@@ -738,12 +771,16 @@ export class InternalController {
     await db
       .update(analysisRuns)
       .set({
-        sampleShas: parsed.samples
-          .slice()
-          .sort((a, b) => a.topoIndex - b.topoIndex)
-          .map((s) => s.sha),
-        commitsTotal: parsed.samples.length,
-        sampleConfig: parsed.sampleConfig ?? {},
+        ...(parsed.samples.length
+          ? {
+              sampleShas: parsed.samples
+                .slice()
+                .sort((a, b) => a.topoIndex - b.topoIndex)
+                .map((s) => s.sha),
+              commitsTotal: parsed.samples.length,
+              sampleConfig: parsed.sampleConfig ?? {},
+            }
+          : {}),
       })
       .where(eq(analysisRuns.id, parsed.runId));
 
@@ -988,16 +1025,28 @@ export class InternalController {
   async checkpoint(@Param('repoId') repoId: string, @Body() body: unknown) {
     const parsed = CheckpointBody.parse(body);
     await this.requireRepo(repoId);
-    await db.insert(graphDeltas).values({
-      repoId,
-      runId: parsed.runId ?? null,
-      fromSha: parsed.sha,
-      toSha: parsed.sha,
-      fromTopo: parsed.topoIndex,
-      toTopo: parsed.topoIndex,
-      artifactUri: parsed.artifactUri,
-      isCheckpoint: true,
-    });
+    await db
+      .insert(graphDeltas)
+      .values({
+        repoId,
+        runId: parsed.runId ?? null,
+        fromSha: parsed.sha,
+        toSha: parsed.sha,
+        fromTopo: parsed.topoIndex,
+        toTopo: parsed.topoIndex,
+        artifactUri: parsed.artifactUri,
+        isCheckpoint: true,
+      })
+      .onConflictDoUpdate({
+        target: [graphDeltas.repoId, graphDeltas.fromSha, graphDeltas.toSha],
+        set: {
+          runId: parsed.runId ?? null,
+          fromTopo: parsed.topoIndex,
+          toTopo: parsed.topoIndex,
+          artifactUri: parsed.artifactUri,
+          isCheckpoint: true,
+        },
+      });
     return { ok: true };
   }
 

@@ -6,7 +6,7 @@
  * maintainability_proxy: see ADR 0013 — weighted combo for heatmaps only.
  */
 
-import { entityId, type EntityKindForId } from './entity-id';
+import { entityId, kindForEntityId } from './entity-id';
 import { findSccs, type GraphEdge, type GraphNode, type GraphSnapshot } from './graph-diff';
 
 export const METRIC_NAMES = [
@@ -55,18 +55,8 @@ export type ComputeMetricsInput = {
   fileStats?: Record<string, FileStat>;
 };
 
-function kindForId(kind: string): EntityKindForId {
-  if (kind === 'package') return 'package';
-  if (kind === 'file') return 'file';
-  if (kind === 'class') return 'class';
-  if (kind === 'interface') return 'interface';
-  if (kind === 'function') return 'function';
-  if (kind === 'method') return 'method';
-  return 'variable';
-}
-
 function stableEntityId(repoId: string, node: GraphNode): string {
-  return entityId(repoId, kindForId(node.kind), node.fqn);
+  return entityId(repoId, kindForEntityId(node.kind), node.fqn);
 }
 
 function degreeMaps(edges: GraphEdge[], rels: string[]) {

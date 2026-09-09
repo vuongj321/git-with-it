@@ -8,7 +8,9 @@ import {
   entityId,
   eventsFromDiff,
   findSccs,
+  graphRefToEntityId,
   GWI_ENTITY_NAMESPACE,
+  isEntityUuid,
   isLikelyGitRemoteUrl,
   sampleFirstParentCommits,
   uuidv5,
@@ -158,9 +160,14 @@ describe('findSccs / cycle_introduced golden', () => {
 
     const diff = diffGraphs(from, to);
     expect(diff.sccsAdded).toHaveLength(1);
-    const events = eventsFromDiff(diff);
+    const repoId = '11111111-1111-1111-1111-111111111111';
+    const events = eventsFromDiff(diff, { repoId });
     expect(events.some((e) => e.type === 'cycle_introduced')).toBe(true);
     expect(events.some((e) => e.type === 'dependency_added')).toBe(true);
+    const cycle = events.find((e) => e.type === 'cycle_introduced')!;
+    expect(cycle.entityIds.every(isEntityUuid)).toBe(true);
+    expect(cycle.entityIds).toContain(entityId(repoId, 'file', 'a.ts'));
+    expect(cycle.entityIds).toContain(entityId(repoId, 'file', 'b.ts'));
   });
 });
 
@@ -185,8 +192,28 @@ describe('rename_detected golden', () => {
     expect(diff.nodesRenamed).toHaveLength(1);
     expect(diff.nodesAdded).toHaveLength(0);
     expect(diff.nodesRemoved).toHaveLength(0);
-    const events = eventsFromDiff(diff);
+    const repoId = '11111111-1111-1111-1111-111111111111';
+    const events = eventsFromDiff(diff, { repoId });
     expect(events.some((e) => e.type === 'rename_detected')).toBe(true);
+    const rename = events.find((e) => e.type === 'rename_detected')!;
+    expect(rename.entityIds).toEqual([
+      entityId(repoId, 'file', 'src/old.ts'),
+      entityId(repoId, 'file', 'src/new.ts'),
+    ]);
+  });
+});
+
+describe('graphRefToEntityId', () => {
+  it('maps file/pkg graph ids to UUIDv5', () => {
+    const repoId = '11111111-1111-1111-1111-111111111111';
+    expect(graphRefToEntityId(repoId, 'file:src/a.ts')).toBe(
+      entityId(repoId, 'file', 'src/a.ts'),
+    );
+    expect(graphRefToEntityId(repoId, 'pkg:@scope/pkg')).toBe(
+      entityId(repoId, 'package', '@scope/pkg'),
+    );
+    const uuid = entityId(repoId, 'file', 'x.ts');
+    expect(graphRefToEntityId(repoId, uuid)).toBe(uuid);
   });
 });
 

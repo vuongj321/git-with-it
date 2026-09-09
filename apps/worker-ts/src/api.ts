@@ -5,6 +5,15 @@ export function serviceToken() {
   return createHash('sha256').update(`gwi-service:${env.AUTH_SECRET}`).digest('hex');
 }
 
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items];
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out.length ? out : [[]];
+}
+
 export async function apiJson<T>(
   path: string,
   init: Omit<RequestInit, 'body'> & { body?: unknown } = {},
