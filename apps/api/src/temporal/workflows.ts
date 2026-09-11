@@ -1,9 +1,6 @@
 /**
- * Temporal AnalysisRun workflow + activities (Phase 5).
- * Workers register these when ORCHESTRATOR=temporal.
- *
- * Activity implementations call the same internal APIs / worker functions as BullMQ
- * stages so idempotency keys (repo_id, analyzer_version, sha, stage) stay shared.
+ * Temporal AnalysisRun workflow + activity factory (API-side definitions).
+ * Worker-side durable implementation lives in apps/worker-ts/src/temporal/.
  */
 
 export type AnalysisRunInput = {
@@ -16,25 +13,26 @@ export type AnalysisRunInput = {
   encryptedPat?: string;
 };
 
-/** Workflow definition (executed inside Temporal worker runtime). */
+/**
+ * Workflow control flow (documentation + dual-run stub).
+ * The Temporal worker executes the isomorphic workflow under
+ * `apps/worker-ts/src/temporal/workflows.ts` with proxyActivities.
+ */
 export async function analysisRunWorkflow(input: AnalysisRunInput): Promise<{
   runId: string;
   status: 'completed' | 'canceled';
 }> {
-  // Placeholder structure for the Temporal worker package.
-  // Real worker binds proxyActivities with heartbeats on parse batches.
   const stages = [
     'clone',
     'enumerateSample',
     'parseBatch',
-    'graphDelta',
     'metrics',
-    'checkpoint',
     'evolve',
     'aiInsights',
   ] as const;
   void stages;
   void input;
+  // Client starts this workflow by name; worker runs the real activity chain.
   return { runId: input.runId, status: 'completed' };
 }
 

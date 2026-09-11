@@ -148,6 +148,11 @@ function SOURCE_EXT(p: string) {
  * 3. Enqueue evolve
  */
 export async function processParseCommitJob(payload: ParseCommitJobPayload) {
+  const { withRepoNeo4jLock } = await import('./repo-lock');
+  return withRepoNeo4jLock(payload.repoId, () => processParseCommitJobLocked(payload));
+}
+
+async function processParseCommitJobLocked(payload: ParseCommitJobPayload) {
   const log = logger.child({
     job_id: payload.jobId,
     run_id: payload.runId,
@@ -419,6 +424,21 @@ async function parseAndBuildGraph(opts: {
     });
     if (scip.attempted) {
       logger.info({ scip }, 'SCIP precision path considered');
+    }
+    if (scip.invoked && scip.indexPath) {
+      await apiJson(`/v1/internal/repos/${opts.repoId}/precision`, {
+        method: 'POST',
+        body: {
+          precisionMode: 'scip',
+          language: scip.language ?? null,
+          reason: scip.reason,
+        },
+      }).catch((err) => {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'failed to persist precision_mode',
+        );
+      });
     }
   }
 

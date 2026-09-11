@@ -54,14 +54,17 @@ const parseWorker = new Worker(
   { connection, concurrency: 1 },
 );
 
-/** Single-writer-per-repo for Neo4j deltas: concurrency 1 on this queue. */
+/**
+ * Neo4j deltas: per-repo Redis lease (ADR 0011) allows multi-repo concurrency.
+ * Same-repo jobs still serialize via withRepoNeo4jLock inside the processor.
+ */
 const parseCommitWorker = new Worker(
   'parse_commit',
   async (job) => {
     const payload = ParseCommitJobPayloadSchema.parse(job.data);
     await processParseCommitJob(payload);
   },
-  { connection, concurrency: 1 },
+  { connection, concurrency: 4 },
 );
 
 const graphWorker = new Worker(
