@@ -80,6 +80,8 @@ export type Repo = {
   cloneUri: string | null;
   lastSyncedSha: string | null;
   lastError: string | null;
+  precisionMode?: 'structural' | 'scip' | string;
+  features?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 };
@@ -138,7 +140,12 @@ export type GraphSlice = {
   sha: string;
   nodes: GraphNodeDto[];
   edges: GraphEdgeDto[];
+  /** Server-side node cap hit (API field name). */
+  capped?: boolean;
+  /** Alias some clients used historically. */
   truncated?: boolean;
+  focus?: string | null;
+  depth?: number | null;
 };
 
 export type MetricsSummary = {

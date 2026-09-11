@@ -28,7 +28,7 @@ function heatColor(t: number): string {
 
 export function ArchitectureGraph() {
   const params = useParams<{ org: string; repo: string }>();
-  const { sha, from, to, view, metric, focus, setState } = useRepoUrlState();
+  const { sha, from, to, view, metric, focus, depth, setState } = useRepoUrlState();
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const [selected, setSelected] = useState<{
@@ -55,13 +55,31 @@ export function ArchitectureGraph() {
   const compareMode = Boolean(from && to);
 
   const graphQuery = useQuery({
-    queryKey: ['graph', params.repo, effectiveSha, view],
+    queryKey: ['graph', params.repo, effectiveSha, view, focus, depth],
     enabled: Boolean(orgQuery.data?.id && effectiveSha && !compareMode),
-    queryFn: () =>
-      api<GraphSlice>(
-        `/v1/repos/${params.repo}/graph?orgId=${orgQuery.data!.id}&sha=${effectiveSha}&view=${view}&limit=500`,
-      ),
+    queryFn: () => {
+      const q = new URLSearchParams({
+        orgId: orgQuery.data!.id,
+        sha: effectiveSha,
+        view,
+        limit: '500',
+      });
+      if (focus) {
+        q.set('focus', focus);
+        q.set('depth', String(Number.isFinite(depth) && depth > 0 ? depth : 1));
+      }
+      return api<GraphSlice>(`/v1/repos/${params.repo}/graph?${q.toString()}`);
+    },
   });
+
+  function expandEgo(nodeId: string) {
+    const nextDepth =
+      focus === nodeId
+        ? Math.min(3, (Number.isFinite(depth) && depth > 0 ? depth : 1) + 1)
+        : 1;
+    setState({ focus: nodeId, depth: nextDepth });
+    setSelected(null);
+  }
 
   const heatmapQuery = useQuery({
     queryKey: ['heatmap', params.repo, effectiveSha, metric, view],
@@ -206,6 +224,7 @@ export function ArchitectureGraph() {
         labelColor: { color: '#f2f2f4' },
         defaultEdgeColor: 'rgba(242,242,244,0.22)',
       });
+      // Selection only — ego expand is explicit via the side-panel button.
       sigma.on('clickNode', ({ node }) => {
         const attrs = graph.getNodeAttributes(node);
         setSelected({
@@ -214,8 +233,21 @@ export function ArchitectureGraph() {
           fqn: String(attrs.fqn ?? node),
           kind: attrs.kind != null ? String(attrs.kind) : undefined,
         });
-        setState({ focus: node });
       });
+      if (focus && graph.hasNode(focus)) {
+        try {
+          const cam = sigma.getCamera();
+          const display = sigma.getNodeDisplayData(focus);
+          if (display) {
+            cam.animate(
+              { x: display.x, y: display.y, ratio: Math.min(cam.ratio, 0.45) },
+              { duration: 350 },
+            );
+          }
+        } catch {
+          // camera helpers differ across sigma versions; layout still updates
+        }
+      }
       sigmaRef.current = sigma;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -232,13 +264,12 @@ export function ArchitectureGraph() {
     graphQuery.data,
     heatMap,
     heatMax,
-    setState,
   ]);
 
   const loading =
-    (!compareMode && graphQuery.isLoading) ||
+    (!compareMode && (graphQuery.isLoading || graphQuery.isFetching)) ||
     (compareMode && diffQuery.isLoading);
-  const truncated = graphQuery.data?.truncated;
+  const truncated = Boolean(graphQuery.data?.truncated ?? graphQuery.data?.capped);
 
   return (
     <div className="graph-shell">
@@ -290,9 +321,33 @@ export function ArchitectureGraph() {
         <div ref={containerRef} className="graph-canvas" />
         {loading ? <div className="graph-overlay muted">Loading graph…</div> : null}
         {error ? <div className="graph-overlay error">{error}</div> : null}
-        {truncated ? (
+        {truncated && !focus ? (
           <div className="graph-banner muted">
-            Graph truncated at server cap — expand from a focus node for ego network.
+            Graph truncated at server cap — select a node, then Expand ego network.
+          </div>
+        ) : null}
+        {focus ? (
+          <div className="graph-banner muted">
+            Ego network around <span className="mono">{focus}</span> · depth{' '}
+            {Number.isFinite(depth) && depth > 0 ? depth : 1}
+            /3 · {graphQuery.data?.nodes.length ?? 0} nodes{' '}
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                if (focus) expandEgo(focus);
+              }}
+              disabled={(depth || 1) >= 3 || graphQuery.isFetching}
+            >
+              Deeper
+            </button>{' '}
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setState({ focus: '', depth: 1 })}
+            >
+              Clear
+            </button>
           </div>
         ) : null}
         {selected ? (
@@ -322,6 +377,14 @@ export function ArchitectureGraph() {
                 ))}
               </ul>
             )}
+            <button
+              type="button"
+              className="btn"
+              style={{ marginTop: '0.75rem' }}
+              onClick={() => expandEgo(selected.id)}
+            >
+              {focus === selected.id ? 'Expand deeper' : 'Expand ego network'}
+            </button>
             <button
               type="button"
               className="btn btn-ghost"

@@ -120,6 +120,15 @@ export default function OverviewPage() {
         <p className="muted">
           Tip {tipSha ? <span className="mono">{tipSha.slice(0, 12)}</span> : '—'} ·{' '}
           {samples.length} sampled commits
+          {repo?.precisionMode ? (
+            <>
+              {' '}
+              · Precision:{' '}
+              <span className="mono">
+                {repo.precisionMode === 'scip' ? 'SCIP' : 'structural'}
+              </span>
+            </>
+          ) : null}
         </p>
         {run ? (
           <p className="mono">
