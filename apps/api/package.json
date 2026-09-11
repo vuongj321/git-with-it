@@ -24,6 +24,7 @@
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.34.5",
     "drizzle-orm": "^0.38.3",
+    "express": "^4.22.1",
     "ioredis": "^5.4.2",
     "jose": "^5.9.6",
     "neo4j-driver": "^6.2.0",
