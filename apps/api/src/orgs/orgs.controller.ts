@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -12,11 +13,18 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CreateOrgBodySchema } from '@gwi/shared-types';
 import { and, eq } from 'drizzle-orm';
 import type { Request } from 'express';
+import { z } from 'zod';
 import { JwtOrSessionAuthGuard } from '../auth/jwt-or-session.guard';
 import { OrgMembershipGuard } from '../auth/org-membership.guard';
 import { OrgIdParam } from '../auth/org.decorator';
 import { db } from '../db/client';
-import { memberships, organizations } from '../db/schema';
+import { memberships, organizations, webhookEndpoints } from '../db/schema';
+
+const CreateWebhookBody = z.object({
+  url: z.string().url(),
+  secret: z.string().min(8).optional(),
+  events: z.array(z.string().min(1)).default(['insight.created']),
+});
 
 @ApiTags('orgs')
 @ApiBearerAuth()
@@ -70,6 +78,47 @@ export class OrgsController {
     if (!row) throw new NotFoundException('Organization not found');
     return serializeOrg(row.org);
   }
+
+  @Get(':id/webhooks')
+  @OrgIdParam('id')
+  @UseGuards(OrgMembershipGuard)
+  async listWebhooks(@Param('id') id: string) {
+    const rows = await db
+      .select()
+      .from(webhookEndpoints)
+      .where(eq(webhookEndpoints.orgId, id));
+    return rows.map(serializeWebhook);
+  }
+
+  @Post(':id/webhooks')
+  @OrgIdParam('id')
+  @UseGuards(OrgMembershipGuard)
+  async createWebhook(@Param('id') id: string, @Body() body: unknown) {
+    const parsed = CreateWebhookBody.parse(body);
+    const [row] = await db
+      .insert(webhookEndpoints)
+      .values({
+        orgId: id,
+        url: parsed.url,
+        secret: parsed.secret ?? null,
+        events: parsed.events,
+      })
+      .returning();
+    return serializeWebhook(row!);
+  }
+
+  @Delete(':id/webhooks/:webhookId')
+  @OrgIdParam('id')
+  @UseGuards(OrgMembershipGuard)
+  async deleteWebhook(
+    @Param('id') id: string,
+    @Param('webhookId') webhookId: string,
+  ) {
+    await db
+      .delete(webhookEndpoints)
+      .where(and(eq(webhookEndpoints.id, webhookId), eq(webhookEndpoints.orgId, id)));
+    return { ok: true, id: webhookId };
+  }
 }
 
 function serializeOrg(org: typeof organizations.$inferSelect) {
@@ -78,5 +127,18 @@ function serializeOrg(org: typeof organizations.$inferSelect) {
     name: org.name,
     slug: org.slug,
     createdAt: org.createdAt.toISOString(),
+  };
+}
+
+function serializeWebhook(row: typeof webhookEndpoints.$inferSelect) {
+  return {
+    id: row.id,
+    orgId: row.orgId,
+    url: row.url,
+    events: row.events,
+    enabled: row.enabled,
+    hasSecret: Boolean(row.secret),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }

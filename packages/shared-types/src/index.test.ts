@@ -136,9 +136,13 @@ describe('sampleFirstParentCommits', () => {
 });
 
 describe('findSccs / cycle_introduced golden', () => {
-  it('detects a new cycle between shas', () => {
+  it('detects a new cycle between shas from evolution-cycle.json', () => {
+    const golden = JSON.parse(
+      readFileSync(path.join(goldensDir, 'evolution-cycle.json'), 'utf8'),
+    ) as { fromSha: string; toSha: string; expectEventTypes: string[] };
+
     const from: GraphSnapshot = {
-      sha: 'aaa1111',
+      sha: golden.fromSha,
       nodes: [
         { id: 'file:a.ts', kind: 'file', fqn: 'a.ts', name: 'a.ts' },
         { id: 'file:b.ts', kind: 'file', fqn: 'b.ts', name: 'b.ts' },
@@ -148,7 +152,7 @@ describe('findSccs / cycle_introduced golden', () => {
       ],
     };
     const to: GraphSnapshot = {
-      sha: 'bbb2222',
+      sha: golden.toSha,
       nodes: from.nodes,
       edges: [
         { from: 'file:a.ts', to: 'file:b.ts', rel: 'DEPENDS_ON' },
@@ -162,8 +166,9 @@ describe('findSccs / cycle_introduced golden', () => {
     expect(diff.sccsAdded).toHaveLength(1);
     const repoId = '11111111-1111-1111-1111-111111111111';
     const events = eventsFromDiff(diff, { repoId });
-    expect(events.some((e) => e.type === 'cycle_introduced')).toBe(true);
-    expect(events.some((e) => e.type === 'dependency_added')).toBe(true);
+    for (const t of golden.expectEventTypes) {
+      expect(events.some((e) => e.type === t)).toBe(true);
+    }
     const cycle = events.find((e) => e.type === 'cycle_introduced')!;
     expect(cycle.entityIds.every(isEntityUuid)).toBe(true);
     expect(cycle.entityIds).toContain(entityId(repoId, 'file', 'a.ts'));
@@ -172,29 +177,40 @@ describe('findSccs / cycle_introduced golden', () => {
 });
 
 describe('rename_detected golden', () => {
-  it('aligns renamed file ids and emits rename_detected', () => {
+  it('aligns renamed file ids from evolution-rename.json', () => {
+    const golden = JSON.parse(
+      readFileSync(path.join(goldensDir, 'evolution-rename.json'), 'utf8'),
+    ) as {
+      fromSha: string;
+      toSha: string;
+      rename: { from: string; to: string };
+      expectEventTypes: string[];
+    };
+
     const from: GraphSnapshot = {
-      sha: 'ccc3333',
+      sha: golden.fromSha,
       nodes: [
-        { id: 'file:src/old.ts', kind: 'file', fqn: 'src/old.ts', name: 'old.ts' },
+        { id: golden.rename.from, kind: 'file', fqn: 'src/old.ts', name: 'old.ts' },
       ],
       edges: [],
     };
     const to: GraphSnapshot = {
-      sha: 'ddd4444',
+      sha: golden.toSha,
       nodes: [
-        { id: 'file:src/new.ts', kind: 'file', fqn: 'src/new.ts', name: 'new.ts' },
+        { id: golden.rename.to, kind: 'file', fqn: 'src/new.ts', name: 'new.ts' },
       ],
       edges: [],
     };
-    const renameMap = new Map([['file:src/old.ts', 'file:src/new.ts']]);
+    const renameMap = new Map([[golden.rename.from, golden.rename.to]]);
     const diff = diffGraphs(from, to, { renameMap });
     expect(diff.nodesRenamed).toHaveLength(1);
     expect(diff.nodesAdded).toHaveLength(0);
     expect(diff.nodesRemoved).toHaveLength(0);
     const repoId = '11111111-1111-1111-1111-111111111111';
     const events = eventsFromDiff(diff, { repoId });
-    expect(events.some((e) => e.type === 'rename_detected')).toBe(true);
+    for (const t of golden.expectEventTypes) {
+      expect(events.some((e) => e.type === t)).toBe(true);
+    }
     const rename = events.find((e) => e.type === 'rename_detected')!;
     expect(rename.entityIds).toEqual([
       entityId(repoId, 'file', 'src/old.ts'),

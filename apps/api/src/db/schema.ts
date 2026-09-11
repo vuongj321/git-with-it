@@ -586,6 +586,24 @@ export const githubRepoLinks = pgTable(
   ],
 );
 
+/** Outbound HTTPS endpoints for org events (insight.created, …). */
+export const webhookEndpoints = pgTable(
+  'webhook_endpoints',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    url: text('url').notNull(),
+    secret: text('secret'),
+    events: jsonb('events').$type<string[]>().notNull().default(['insight.created']),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('webhook_endpoints_org_idx').on(t.orgId)],
+);
+
 export type Organization = typeof organizations.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
@@ -607,3 +625,4 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type UsageCounter = typeof usageCounters.$inferSelect;
 export type GithubAppInstall = typeof githubAppInstalls.$inferSelect;
 export type GithubRepoLink = typeof githubRepoLinks.$inferSelect;
+export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect;

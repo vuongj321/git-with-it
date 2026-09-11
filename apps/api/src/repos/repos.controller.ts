@@ -2,11 +2,13 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpException,
   HttpStatus,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -16,6 +18,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CreateRepoBodySchema,
   SampleConfigSchema,
+  UpdateRepoBodySchema,
   diffGraphs,
   graphRefToEntityId,
   isEntityUuid,
@@ -72,6 +75,8 @@ const GraphQuery = z.object({
   sha: z.string().min(7).optional(),
   view: z.enum(['package', 'file']).default('package'),
   limit: z.coerce.number().int().min(1).max(500).default(500),
+  focus: z.string().min(1).optional(),
+  depth: z.coerce.number().int().min(1).max(3).default(1),
 });
 
 const EntitiesQuery = z.object({
@@ -204,6 +209,40 @@ export class ReposController {
     return serializeRepo(repo);
   }
 
+  @Patch(':id')
+  async update(
+    @Param('id') id: string,
+    @Query('orgId') orgId: string,
+    @Body() body: unknown,
+  ) {
+    const repo = await this.requireRepo(id, orgId);
+    const parsed = UpdateRepoBodySchema.parse(body);
+    const [updated] = await db
+      .update(repositories)
+      .set({
+        ...(parsed.defaultBranch !== undefined
+          ? { defaultBranch: parsed.defaultBranch }
+          : {}),
+        ...(parsed.visibility !== undefined ? { visibility: parsed.visibility } : {}),
+        ...(parsed.features !== undefined
+          ? { features: { ...(repo.features ?? {}), ...parsed.features } }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(repositories.id, repo.id), eq(repositories.orgId, orgId)))
+      .returning();
+    return serializeRepo(updated!);
+  }
+
+  @Delete(':id')
+  async remove(@Param('id') id: string, @Query('orgId') orgId: string) {
+    await this.requireRepo(id, orgId);
+    await db
+      .delete(repositories)
+      .where(and(eq(repositories.id, id), eq(repositories.orgId, orgId)));
+    return { ok: true, id };
+  }
+
   @Get(':id/commits')
   async listCommits(
     @Param('id') id: string,
@@ -290,7 +329,13 @@ export class ReposController {
       .where(and(eq(commits.repoId, repo.id), eq(commits.sha, sha)))
       .limit(1);
 
-    const cacheKey = graphCacheKey(repo.id, sha, parsed.view, 'root', '0');
+    const cacheKey = graphCacheKey(
+      repo.id,
+      sha,
+      parsed.view,
+      parsed.focus ?? 'root',
+      String(parsed.focus ? parsed.depth : 0),
+    );
     const cached = await cacheGet<unknown>(cacheKey);
     if (cached) return cached;
 
@@ -301,6 +346,8 @@ export class ReposController {
         topoIndex: commit?.topoIndex ?? null,
         view: parsed.view,
         maxNodes: parsed.limit,
+        focus: parsed.focus,
+        depth: parsed.depth,
       });
       await cacheSet(cacheKey, slice, 120);
       return slice;

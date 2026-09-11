@@ -270,6 +270,10 @@ export async function queryGraphSlice(opts: {
   topoIndex?: number | null;
   view: 'package' | 'file';
   maxNodes: number;
+  /** Entity id (graph node id) to center an ego-network expansion on. */
+  focus?: string | null;
+  /** Hop depth from focus (1–3). Ignored without focus. */
+  depth?: number | null;
 }) {
   const session = neo4jDriver().session();
   try {
@@ -278,40 +282,99 @@ export async function queryGraphSlice(opts: {
       opts.topoIndex === undefined || opts.topoIndex === null
         ? null
         : neo4j.int(opts.topoIndex);
+    const focus = opts.focus?.trim() || null;
+    const depth = Math.max(1, Math.min(3, opts.depth ?? 1));
 
-    // Prefer temporal filter when topoIndex known; else fall back to legacy sha tag
-    const result = idx !== null
-      ? await session.run(
-          `
-          MATCH (n {repo_id: $repoId, kind: $kind})
-          WITH n LIMIT $limit
-          OPTIONAL MATCH (n)-[r]->(m {repo_id: $repoId, kind: $kind})
-          WHERE r.valid_from <= $idx AND $idx < r.valid_to
-          RETURN n, r, m
-          `,
-          {
-            repoId: opts.repoId,
-            kind: kindFilter,
-            limit: neo4j.int(opts.maxNodes),
-            idx,
-          },
-        )
-      : await session.run(
-          `
-          MATCH (n {repo_id: $repoId, kind: $kind})
-          WHERE n.sha = $sha OR n.sha IS NULL
-          WITH n LIMIT $limit
-          OPTIONAL MATCH (n)-[r]->(m {repo_id: $repoId, kind: $kind})
-          WHERE (r.sha = $sha) OR (r.valid_to IS NOT NULL AND r.valid_from IS NOT NULL)
-          RETURN n, r, m
-          `,
-          {
-            repoId: opts.repoId,
-            sha: opts.sha,
-            kind: kindFilter,
-            limit: neo4j.int(opts.maxNodes),
-          },
-        );
+    let result;
+    if (focus) {
+      // Ego network: hop count must be a literal in Cypher (clamped 1–3).
+      // Match seed by id first (kind filter is applied to neighbors) so expand
+      // still works if kind was missing on an older node write.
+      const pattern = `[*0..${depth}]`;
+      result =
+        idx !== null
+          ? await session.run(
+              `
+              MATCH (seed {repo_id: $repoId, id: $focus})
+              WHERE seed.kind = $kind OR seed.kind IS NULL
+              MATCH (seed)-${pattern}-(n {repo_id: $repoId})
+              WHERE n.kind = $kind OR n = seed
+              WITH DISTINCT n LIMIT $limit
+              WITH collect(n) AS nodeList
+              UNWIND nodeList AS n
+              OPTIONAL MATCH (n)-[r]->(m {repo_id: $repoId})
+              WHERE m IN nodeList
+                AND (m.kind = $kind OR m = n)
+                AND (r.valid_from IS NULL OR (r.valid_from <= $idx AND $idx < r.valid_to))
+              RETURN n, r, m
+              `,
+              {
+                repoId: opts.repoId,
+                kind: kindFilter,
+                focus,
+                limit: neo4j.int(opts.maxNodes),
+                idx,
+              },
+            )
+          : await session.run(
+              `
+              MATCH (seed {repo_id: $repoId, id: $focus})
+              WHERE seed.kind = $kind OR seed.kind IS NULL
+              MATCH (seed)-${pattern}-(n {repo_id: $repoId})
+              WHERE n.kind = $kind OR n = seed
+              WITH DISTINCT n LIMIT $limit
+              WITH collect(n) AS nodeList
+              UNWIND nodeList AS n
+              OPTIONAL MATCH (n)-[r]->(m {repo_id: $repoId})
+              WHERE m IN nodeList
+                AND (m.kind = $kind OR m = n)
+                AND (r.sha = $sha OR r.sha IS NULL OR r.valid_to IS NOT NULL)
+              RETURN n, r, m
+              `,
+              {
+                repoId: opts.repoId,
+                sha: opts.sha,
+                kind: kindFilter,
+                focus,
+                limit: neo4j.int(opts.maxNodes),
+              },
+            );
+    } else {
+      // Prefer temporal filter when topoIndex known; else fall back to legacy sha tag
+      result =
+        idx !== null
+          ? await session.run(
+              `
+              MATCH (n {repo_id: $repoId, kind: $kind})
+              WITH n LIMIT $limit
+              OPTIONAL MATCH (n)-[r]->(m {repo_id: $repoId, kind: $kind})
+              WHERE r.valid_from <= $idx AND $idx < r.valid_to
+              RETURN n, r, m
+              `,
+              {
+                repoId: opts.repoId,
+                kind: kindFilter,
+                limit: neo4j.int(opts.maxNodes),
+                idx,
+              },
+            )
+          : await session.run(
+              `
+              MATCH (n {repo_id: $repoId, kind: $kind})
+              WHERE n.sha = $sha OR n.sha IS NULL
+              WITH n LIMIT $limit
+              OPTIONAL MATCH (n)-[r]->(m {repo_id: $repoId, kind: $kind})
+              WHERE (r.sha = $sha) OR (r.valid_to IS NOT NULL AND r.valid_from IS NOT NULL)
+              RETURN n, r, m
+              `,
+              {
+                repoId: opts.repoId,
+                sha: opts.sha,
+                kind: kindFilter,
+                limit: neo4j.int(opts.maxNodes),
+              },
+            );
+    }
 
     const nodes = new Map<string, Record<string, unknown>>();
     const edges: Array<{ from: string; to: string; rel: string }> = [];
@@ -324,7 +387,7 @@ export async function queryGraphSlice(opts: {
       }
       const m = record.get('m');
       const r = record.get('r');
-      if (m && r) {
+      if (m && r && n) {
         const mp = m.properties as Record<string, unknown>;
         nodes.set(String(mp.id), mp);
         edges.push({
@@ -340,6 +403,8 @@ export async function queryGraphSlice(opts: {
       sha: opts.sha,
       topoIndex: opts.topoIndex ?? null,
       view: opts.view,
+      focus: focus,
+      depth: focus ? depth : null,
       nodes: [...nodes.values()],
       edges,
       capped: nodes.size >= opts.maxNodes,

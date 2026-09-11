@@ -124,6 +124,13 @@ export const CreateRepoBodySchema = z.object({
 });
 export type CreateRepoBody = z.infer<typeof CreateRepoBodySchema>;
 
+export const UpdateRepoBodySchema = z.object({
+  defaultBranch: z.string().min(1).optional(),
+  visibility: z.enum(['public', 'private']).optional(),
+  features: z.record(z.unknown()).optional(),
+});
+export type UpdateRepoBody = z.infer<typeof UpdateRepoBodySchema>;
+
 export const CreateOrgBodySchema = z.object({
   name: z.string().min(1).max(120),
   slug: z

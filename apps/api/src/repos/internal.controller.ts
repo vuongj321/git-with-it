@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   NotFoundException,
   Param,
   Patch,
@@ -345,6 +346,39 @@ const InsightBatchUpsertBody = z.object({
 export class InternalController {
   constructor(private readonly jobsService: JobsService) {}
 
+  @Get('repos/:repoId')
+  async getRepo(@Param('repoId') repoId: string) {
+    const repo = await this.requireRepo(repoId);
+    return {
+      id: repo.id,
+      orgId: repo.orgId,
+      cloneUri: repo.cloneUri,
+      lastSyncedSha: repo.lastSyncedSha,
+      precisionMode: repo.precisionMode,
+      status: repo.status,
+    };
+  }
+
+  @Get('runs/:runId')
+  async getRun(@Param('runId') runId: string) {
+    const [run] = await db
+      .select()
+      .from(analysisRuns)
+      .where(eq(analysisRuns.id, runId))
+      .limit(1);
+    if (!run) throw new NotFoundException('Run not found');
+    return {
+      id: run.id,
+      repoId: run.repoId,
+      status: run.status,
+      sampleShas: run.sampleShas ?? [],
+      commitSha: run.commitSha,
+      analyzerVersion: run.analyzerVersion,
+      commitsDone: run.commitsDone,
+      commitsTotal: run.commitsTotal,
+    };
+  }
+
   @Patch('runs/:runId')
   async updateRun(@Param('runId') runId: string, @Body() body: unknown) {
     const parsed = UpdateRunBody.parse(body);
@@ -650,6 +684,31 @@ export class InternalController {
     });
 
     return { ok: true, jobId: job!.id };
+  }
+
+  @Post('repos/:repoId/precision')
+  async setPrecision(@Param('repoId') repoId: string, @Body() body: unknown) {
+    const repo = await this.requireRepo(repoId);
+    const parsed = z
+      .object({
+        precisionMode: z.enum(['structural', 'scip']),
+        language: z.string().nullable().optional(),
+        reason: z.string().optional(),
+      })
+      .parse(body);
+    await db
+      .update(repositories)
+      .set({
+        precisionMode: parsed.precisionMode,
+        features: {
+          ...(repo.features ?? {}),
+          scipLanguage: parsed.language ?? null,
+          scipReason: parsed.reason ?? null,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(repositories.id, repoId));
+    return { ok: true, precisionMode: parsed.precisionMode };
   }
 
   @Post('repos/:repoId/metrics/write')
@@ -1192,6 +1251,36 @@ export class InternalController {
         })
         .returning();
       console.info('insight.created', { repoId, runId: parsed.runId, insightId: row!.id });
+      try {
+        const { dispatchOrgWebhook, orgIdForRepo } = await import('../webhooks/dispatch');
+        const orgId = await orgIdForRepo(repoId);
+        if (orgId) {
+          const result = await dispatchOrgWebhook({
+            orgId,
+            event: 'insight.created',
+            payload: {
+              insightId: row!.id,
+              repoId,
+              runId: parsed.runId,
+              headline: row!.headline,
+              severity: row!.severity,
+              category: row!.category,
+              entityIds: row!.entityIds,
+              fromSha: row!.fromSha,
+              toSha: row!.toSha,
+              evidenceHash: row!.evidenceHash,
+            },
+          });
+          if (result.delivered || result.failed) {
+            console.info('insight.created webhook', { repoId, ...result });
+          }
+        }
+      } catch (err) {
+        console.warn(
+          'insight.created webhook dispatch failed',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
 
     return {
