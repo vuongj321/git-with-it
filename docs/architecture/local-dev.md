@@ -14,7 +14,7 @@ make up
 |---|---|---|
 | Postgres 16 | `5432` | `gwi` / `gwi`, db `gwi` — system of record |
 | Redis 7 | `6379` | BullMQ clone queue + session stub |
-| MinIO | `9000` (S3), `9001` (console) | `gwiadmin` / `gwiadmin123`, bucket `gwi-artifacts` |
+| MinIO (Chainguard) | `9000` (S3), `9001` (console) | `gwiadmin` / `gwiadmin123`; bucket `gwi-artifacts` created by the worker on first use |
 | Neo4j 5 | `7474` (HTTP), `7687` (Bolt) | `neo4j` / `gwi-local-dev` — Phase 1 sha-tagged graph snapshots
 | ClickHouse | `8123` (HTTP), `9009` (native) | `default` / `gwi` — metrics (Phase 3+) |
 
@@ -55,6 +55,16 @@ Ephemeral clone workspaces under `.tmp/workspaces` can fail on OneDrive-synced p
 
 1. WSL2 with the repo outside OneDrive, or
 2. Running `apps/worker-ts` in Docker with a Linux volume for `WORKER_TMP_DIR`.
+
+## Migrating MinIO volumes
+
+Compose uses Chainguard's non-root MinIO image. If you previously ran `minio/minio`, recreate the data volume once so the new process can write:
+
+```bash
+docker compose -f infra/docker-compose.yml down
+docker volume rm gwi_minio_data
+make up
+```
 
 ## Smoke checks
 

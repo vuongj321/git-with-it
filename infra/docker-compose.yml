@@ -29,8 +29,10 @@ services:
       timeout: 3s
       retries: 10
 
+  # MinIO CE images left Docker Hub; Chainguard publishes a maintained drop-in.
+  # Bucket gwi-artifacts is created by the worker (ensureBucket), not an init container.
   minio:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: gwiadmin
@@ -40,25 +42,7 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_started
-    entrypoint: >
-      /bin/sh -c "
-      sleep 3;
-      mc alias set local http://minio:9000 gwiadmin gwiadmin123;
-      mc mb -p local/gwi-artifacts || true;
-      exit 0;
-      "
+    # Distroless image has no curl/shell; readiness is checked from the host in CI/docs.
 
   neo4j:
     image: neo4j:5-community
