@@ -142,8 +142,8 @@ export function ArchitectureGraph() {
         }
         for (const n of nodes) {
           if (graph.hasNode(n.id)) continue;
-          let color = '#8fa296';
-          if (addedN.has(n.id)) color = '#3dba7c';
+          let color = '#9a9aa3';
+          if (addedN.has(n.id)) color = '#8a70ff';
           else if (removedN.has(n.id)) color = '#e85d4c';
           else color = '#d4a017';
           graph.addNode(n.id, {
@@ -160,7 +160,7 @@ export function ArchitectureGraph() {
           if (!graph.hasNode(e.from) || !graph.hasNode(e.to)) continue;
           if (graph.hasEdge(e.from, e.to)) continue;
           let color = '#d4a017';
-          if (addedE.has(key)) color = '#3dba7c';
+          if (addedE.has(key)) color = '#8a70ff';
           if (removedE.has(key)) color = '#e85d4c';
           graph.addEdge(e.from, e.to, { size: 1.5, color });
         }
@@ -169,7 +169,7 @@ export function ArchitectureGraph() {
         for (const n of slice.nodes) {
           const heat = heatMap.get(n.id);
           const color =
-            heat != null ? heatColor(heat / heatMax) : '#7fd0a4';
+            heat != null ? heatColor(heat / heatMax) : '#b5a6ff';
           graph.addNode(n.id, {
             label: n.name || n.fqn,
             fqn: n.fqn,
@@ -182,7 +182,7 @@ export function ArchitectureGraph() {
         for (const e of slice.edges) {
           if (!graph.hasNode(e.from) || !graph.hasNode(e.to)) continue;
           if (graph.hasEdge(e.from, e.to)) continue;
-          graph.addEdge(e.from, e.to, { size: 1, color: 'rgba(232,240,234,0.25)' });
+          graph.addEdge(e.from, e.to, { size: 1, color: 'rgba(242,242,244,0.22)' });
         }
       } else {
         return;
@@ -203,8 +203,8 @@ export function ArchitectureGraph() {
       sigmaRef.current?.kill();
       const sigma = new Sigma(graph, containerRef.current, {
         allowInvalidContainer: true,
-        labelColor: { color: '#e8f0ea' },
-        defaultEdgeColor: 'rgba(232,240,234,0.25)',
+        labelColor: { color: '#f2f2f4' },
+        defaultEdgeColor: 'rgba(242,242,244,0.22)',
       });
       sigma.on('clickNode', ({ node }) => {
         const attrs = graph.getNodeAttributes(node);

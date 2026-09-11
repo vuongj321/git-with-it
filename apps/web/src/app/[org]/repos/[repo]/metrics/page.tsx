@@ -93,19 +93,19 @@ export default function MetricsPage() {
     const points = cycleSeries?.points ?? [];
     return {
       backgroundColor: 'transparent',
-      textStyle: { color: '#b7c7bc' },
+      textStyle: { color: '#c4c4cc' },
       grid: { left: 40, right: 20, top: 30, bottom: 40 },
       tooltip: { trigger: 'axis' },
       xAxis: {
         type: 'category',
         data: points.map((p) => p.commitSha.slice(0, 7)),
-        axisLabel: { color: '#8fa296' },
+        axisLabel: { color: '#9a9aa3' },
       },
       yAxis: {
         type: 'value',
         name: 'cycle_count',
-        axisLabel: { color: '#8fa296' },
-        splitLine: { lineStyle: { color: 'rgba(232,240,234,0.08)' } },
+        axisLabel: { color: '#9a9aa3' },
+        splitLine: { lineStyle: { color: 'rgba(242,242,244,0.08)' } },
       },
       series: [
         {
@@ -113,8 +113,8 @@ export default function MetricsPage() {
           type: 'line',
           smooth: true,
           data: points.map((p) => p.value),
-          lineStyle: { color: '#3dba7c' },
-          itemStyle: { color: '#c6f54c' },
+          lineStyle: { color: '#8a70ff' },
+          itemStyle: { color: '#00c2ff' },
         },
       ],
     };
