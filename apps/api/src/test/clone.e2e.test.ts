@@ -1,11 +1,10 @@
 /**
- * Compose integration smoke for Phase 0 clone E2E.
+ * Compose integration smoke: register repo → analyze → terminal run status.
  *
- * Prerequisites: `make up`, migrated+seeded DB, API + worker running.
+ * Prerequisites: `make up`, migrated+seeded DB, API + worker running, and
+ * gwi-{git,parse,link,graph} on PATH (or GWI_*_BIN set).
  *
  *   pnpm --filter @gwi/api exec vitest run src/test/clone.e2e.test.ts
- *
- * In CI this is intended to run as a Compose service job once Docker is available.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -35,7 +34,7 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 describe.skipIf(!RUN_E2E)('clone e2e', () => {
   it(
-    'registers a public repo, clones, and marks run ready',
+    'registers a public repo, analyzes through the pipeline, and stores an s3 clone',
     async () => {
       const health = await api<{ status: string }>('/health');
       expect(health.status).toBe('ok');
@@ -85,6 +84,7 @@ describe.skipIf(!RUN_E2E)('clone e2e', () => {
         },
       );
 
+      // Analyze continues past clone into parse/graph/metrics/evolve; terminal OK is evolution_ready.
       const deadline = Date.now() + 180_000;
       let status = 'queued';
       let cloneUri: string | null = null;
@@ -94,21 +94,21 @@ describe.skipIf(!RUN_E2E)('clone e2e', () => {
           { headers: { authorization: `Bearer ${login.accessToken}` } },
         );
         status = run.status;
-        if (status === 'ready' || status === 'failed') {
+        if (status === 'evolution_ready' || status === 'failed') {
           const fresh = await api<{ cloneUri: string | null; lastError: string | null }>(
             `/v1/repos/${repo.id}?orgId=${org!.id}`,
             { headers: { authorization: `Bearer ${login.accessToken}` } },
           );
           cloneUri = fresh.cloneUri;
           if (status === 'failed') {
-            throw new Error(fresh.lastError ?? 'clone failed');
+            throw new Error(fresh.lastError ?? 'analyze failed');
           }
           break;
         }
         await new Promise((r) => setTimeout(r, 2_000));
       }
 
-      expect(status).toBe('ready');
+      expect(status).toBe('evolution_ready');
       expect(cloneUri).toMatch(/^s3:\/\//);
     },
     200_000,
