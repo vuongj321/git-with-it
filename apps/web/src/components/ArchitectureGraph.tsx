@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Graph from 'graphology';
 import Sigma from 'sigma';
+import { drawDiscNodeHover, drawDiscNodeLabel } from 'sigma/rendering';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
@@ -14,6 +15,7 @@ import {
   type Insight,
   type Org,
   type Repo,
+  type SampleCommit,
 } from '@/lib/api';
 import { useRepoUrlState } from '@/lib/url-state';
 
@@ -25,6 +27,51 @@ function heatColor(t: number): string {
   const b = Math.round(160 - x * 120);
   return `rgb(${r},${g},${b})`;
 }
+
+/** Dark hover pill so light label text stays readable (sigma defaults to #FFF). */
+const drawDarkNodeHover: typeof drawDiscNodeHover = (context, data, settings) => {
+  const size = settings.labelSize;
+  const font = settings.labelFont;
+  const weight = settings.labelWeight;
+  context.font = `${weight} ${size}px ${font}`;
+
+  context.fillStyle = '#1a1a1a';
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = 0;
+  context.shadowBlur = 8;
+  context.shadowColor = '#000';
+
+  const PADDING = 2;
+  if (typeof data.label === 'string') {
+    const textWidth = context.measureText(data.label).width;
+    const boxWidth = Math.round(textWidth + 5);
+    const boxHeight = Math.round(size + 2 * PADDING);
+    const radius = Math.max(data.size, size / 2) + PADDING;
+    const angleRadian = Math.asin(boxHeight / 2 / radius);
+    const xDeltaCoord = Math.sqrt(
+      Math.abs(Math.pow(radius, 2) - Math.pow(boxHeight / 2, 2)),
+    );
+    context.beginPath();
+    context.moveTo(data.x + xDeltaCoord, data.y + boxHeight / 2);
+    context.lineTo(data.x + radius + boxWidth, data.y + boxHeight / 2);
+    context.lineTo(data.x + radius + boxWidth, data.y - boxHeight / 2);
+    context.lineTo(data.x + xDeltaCoord, data.y - boxHeight / 2);
+    context.arc(data.x, data.y, radius, angleRadian, -angleRadian);
+    context.closePath();
+    context.fill();
+  } else {
+    context.beginPath();
+    context.arc(data.x, data.y, data.size + PADDING, 0, Math.PI * 2);
+    context.closePath();
+    context.fill();
+  }
+
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = 0;
+  context.shadowBlur = 0;
+
+  drawDiscNodeLabel(context, data, settings);
+};
 
 export function ArchitectureGraph() {
   const params = useParams<{ org: string; repo: string }>();
@@ -53,6 +100,17 @@ export function ArchitectureGraph() {
 
   const effectiveSha = sha || repoQuery.data?.lastSyncedSha || '';
   const compareMode = Boolean(from && to);
+
+  const commitsQuery = useQuery({
+    queryKey: ['commits', params.repo, orgQuery.data?.id],
+    enabled: Boolean(orgQuery.data?.id),
+    queryFn: () =>
+      api<SampleCommit[]>(
+        `/v1/repos/${params.repo}/commits?orgId=${orgQuery.data!.id}&sampled=true`,
+      ),
+  });
+
+  const samples = commitsQuery.data ?? [];
 
   const graphQuery = useQuery({
     queryKey: ['graph', params.repo, effectiveSha, view, focus, depth],
@@ -223,6 +281,7 @@ export function ArchitectureGraph() {
         allowInvalidContainer: true,
         labelColor: { color: '#f2f2f4' },
         defaultEdgeColor: 'rgba(242,242,244,0.22)',
+        defaultDrawNodeHover: drawDarkNodeHover,
       });
       // Selection only — ego expand is explicit via the side-panel button.
       sigma.on('clickNode', ({ node }) => {
@@ -276,12 +335,17 @@ export function ArchitectureGraph() {
       <div className="graph-chrome">
         <label className="chrome-field">
           <span className="label">SHA</span>
-          <input
+          <select
             className="field"
             value={effectiveSha}
             onChange={(e) => setState({ sha: e.target.value, from: '', to: '' })}
-            placeholder="commit sha"
-          />
+          >
+            {samples.map((c) => (
+              <option key={c.sha} value={c.sha}>
+                {c.sha.slice(0, 12)} · {c.message?.slice(0, 40) ?? ''}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="chrome-field">
           <span className="label">View</span>

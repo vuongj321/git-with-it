@@ -3,6 +3,11 @@
 import { useCallback, useMemo } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
+/** Internal state keys that differ from their URL query param names. */
+const STATE_TO_PARAM: Record<string, string> = {
+  eventType: 'type',
+};
+
 /** Shareable URL state for sha/compare/metric/view (ADR 0015). */
 export function useRepoUrlState() {
   const router = useRouter();
@@ -29,8 +34,9 @@ export function useRepoUrlState() {
     (patch: Partial<typeof state>, replace = true) => {
       const next = new URLSearchParams(searchParams.toString());
       for (const [key, value] of Object.entries(patch)) {
-        if (value === '' || value == null) next.delete(key);
-        else next.set(key, String(value));
+        const param = STATE_TO_PARAM[key] ?? key;
+        if (value === '' || value == null) next.delete(param);
+        else next.set(param, String(value));
       }
       const qs = next.toString();
       const href = qs ? `${pathname}?${qs}` : pathname;
