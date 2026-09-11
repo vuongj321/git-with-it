@@ -29,7 +29,6 @@ async function main() {
   };
   try {
     // Optional dependency — keep BullMQ-only installs working.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require('@temporalio/worker') as {
       Worker: typeof Worker;
       NativeConnection: typeof NativeConnection;

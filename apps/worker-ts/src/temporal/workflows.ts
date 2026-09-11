@@ -19,7 +19,6 @@ export async function analysisRunWorkflow(input: AnalysisRunInput): Promise<{
   tipSha?: string;
 }> {
   // Imported by Temporal worker sandbox; activities are proxied at runtime.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { proxyActivities } = require('@temporalio/workflow') as {
     proxyActivities: <T>(opts: { startToCloseTimeout: string; heartbeatTimeout?: string }) => T;
   };
