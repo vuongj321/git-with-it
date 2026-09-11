@@ -4,22 +4,22 @@ overview: "A production-grade engineering blueprint for Git With It: an AI-power
 todos:
   - id: phase-0-foundations
     content: "Phase 0: Monorepo, Docker Compose data plane, NestJS API stub, auth, repo CRUD, bare clone worker"
-    status: pending
+    status: completed
   - id: phase-1-parse-identity
     content: "Phase 1: tree-sitter TS/JS+Python extractors, entity registry, blob cache, single-SHA Neo4j graph"
-    status: pending
+    status: completed
   - id: phase-2-evolution
     content: "Phase 2: Commit sampling, incremental parse, edge deltas, graph diff API, evolution timeline events"
-    status: pending
+    status: completed
   - id: phase-3-metrics-ui
     content: "Phase 3: ClickHouse metrics pipeline, Next.js graph/timeline/metrics UI"
-    status: pending
+    status: completed
   - id: phase-4-ai-insights
     content: "Phase 4: Anomaly detection, evidence bundles, LLM insights with grounding guardrails"
-    status: pending
+    status: completed
   - id: phase-5-hardening
     content: "Phase 5: More languages, optional SCIP, Temporal orchestration, multi-tenant isolation, billing"
-    status: pending
+    status: completed
 isProject: false
 ---
 

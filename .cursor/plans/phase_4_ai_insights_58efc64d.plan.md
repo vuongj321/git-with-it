@@ -4,22 +4,22 @@ overview: Add anomaly detection over metrics and evolution events, assemble grou
 todos:
   - id: p4-candidates
     content: Deterministic anomaly/candidate detector with ranking and diversity cap
-    status: pending
+    status: completed
   - id: p4-evidence
     content: evidence_v1 bundle builder, storage, evidence_hash dedupe cache
-    status: pending
+    status: completed
   - id: p4-llm
     content: LLM provider adapter, prompts, JSON schema validation + repair retry
-    status: pending
+    status: completed
   - id: p4-persist-api
     content: insights persistence, ai BullMQ job, APIs, insight.created webhook
-    status: pending
+    status: completed
   - id: p4-ui
     content: Insights UI feed, overview widget, deep links to compare/graph/metrics
-    status: pending
+    status: completed
   - id: p4-eval-safety
     content: Eval fixtures, mock-provider CI, org rate limits, ADRs
-    status: pending
+    status: completed
 isProject: false
 ---
 

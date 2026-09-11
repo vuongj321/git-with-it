@@ -49,6 +49,145 @@ jobs:
       - name: Test Rust crates (incl. golden fixtures)
         run: cargo test --workspace
 
+      - name: JS dependency audit
+        run: pnpm audit --audit-level=high
+        continue-on-error: true
+
+  clone-e2e:
+    runs-on: ubuntu-latest
+    needs: lint-test-build
+    timeout-minutes: 30
+    env:
+      NODE_ENV: development
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://gwi:gwi@localhost:5432/gwi
+      REDIS_URL: redis://localhost:6379
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: gwiadmin
+      S3_SECRET_KEY: gwiadmin123
+      S3_BUCKET: gwi-artifacts
+      S3_REGION: us-east-1
+      S3_FORCE_PATH_STYLE: 'true'
+      AUTH_SECRET: dev-auth-secret-change-me-in-production
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: dev-auth-secret-change-me-in-production
+      SEED_ADMIN_EMAIL: admin@git-with-it.local
+      SEED_ADMIN_PASSWORD: admin1234
+      SEED_ORG_SLUG: demo
+      SEED_ORG_NAME: Demo Org
+      API_PORT: '4000'
+      API_URL: http://localhost:4000
+      WEB_ORIGIN: http://localhost:3000
+      BODY_JSON_LIMIT: 10mb
+      WORKER_TMP_DIR: .tmp/workspaces
+      PAT_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef'
+      AI_PROVIDER: disabled
+      NEO4J_URI: bolt://localhost:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: gwi-local-dev
+      CLICKHOUSE_URL: http://localhost:8123
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: gwi
+      CLICKHOUSE_DATABASE: default
+      SECRET_SCAN_MODE: warn
+      ORCHESTRATOR: bullmq
+      GWI_E2E: '1'
+      GWI_E2E_REMOTE_URL: https://github.com/octocat/Hello-World.git
+      GWI_E2E_BRANCH: master
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.86.0
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared types
+        run: pnpm --filter @gwi/shared-types build
+
+      - name: Build gwi-git release binary
+        run: |
+          cargo build -p gwi-git --release
+          echo "${GITHUB_WORKSPACE}/target/release" >> "$GITHUB_PATH"
+          echo "GWI_GIT_BIN=${GITHUB_WORKSPACE}/target/release/gwi-git" >> "$GITHUB_ENV"
+
+      - name: Write root .env for apps
+        run: cp .env.example .env
+
+      - name: Start Compose data plane
+        run: docker compose -f infra/docker-compose.yml --env-file .env up -d
+
+      - name: Wait for dependencies
+        run: |
+          set -e
+          for i in $(seq 1 60); do
+            pg=$(docker compose -f infra/docker-compose.yml exec -T postgres pg_isready -U gwi -d gwi >/dev/null 2>&1 && echo ok || echo no)
+            redis=$(docker compose -f infra/docker-compose.yml exec -T redis redis-cli ping 2>/dev/null | tr -d '\r' || true)
+            minio=$(curl -sf http://localhost:9000/minio/health/live >/dev/null && echo ok || echo no)
+            neo=$(curl -sf http://localhost:7474 >/dev/null && echo ok || echo no)
+            ch=$(curl -sf http://localhost:8123/ping >/dev/null && echo ok || echo no)
+            if [ "$pg" = ok ] && [ "$redis" = PONG ] && [ "$minio" = ok ] && [ "$neo" = ok ] && [ "$ch" = ok ]; then
+              echo "Dependencies healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose -f infra/docker-compose.yml ps
+          exit 1
+
+      - name: Build API and worker
+        run: |
+          pnpm --filter @gwi/api build
+          pnpm --filter @gwi/worker-ts build
+
+      - name: Migrate and seed
+        run: |
+          pnpm db:migrate
+          pnpm db:seed
+
+      - name: Start API and worker
+        run: |
+          mkdir -p .tmp/workspaces
+          nohup pnpm --filter @gwi/api start > /tmp/gwi-api.log 2>&1 &
+          nohup pnpm --filter @gwi/worker-ts start > /tmp/gwi-worker.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:4000/health | grep -q ok; then
+              echo "API healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "=== API log ==="
+          cat /tmp/gwi-api.log || true
+          echo "=== Worker log ==="
+          cat /tmp/gwi-worker.log || true
+          exit 1
+
+      - name: Clone E2E
+        env:
+          GWI_E2E: '1'
+        run: pnpm test:e2e:clone
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose -f infra/docker-compose.yml ps || true
+          echo "=== API log ==="
+          cat /tmp/gwi-api.log || true
+          echo "=== Worker log ==="
+          cat /tmp/gwi-worker.log || true
+
   docker-images:
     runs-on: ubuntu-latest
     needs: lint-test-build

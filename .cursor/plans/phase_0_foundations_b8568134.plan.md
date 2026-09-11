@@ -4,25 +4,25 @@ overview: Stand up the Git With It monorepo, local data plane, NestJS control pl
 todos:
   - id: p0-monorepo
     content: Scaffold pnpm/Turborepo monorepo, Cargo stub, shared-types, CI lint/test/build
-    status: pending
+    status: completed
   - id: p0-compose
     content: "Docker Compose: Postgres, Redis, MinIO, Neo4j, ClickHouse + local-dev docs"
-    status: pending
+    status: completed
   - id: p0-schema-api
     content: Drizzle schema (orgs/users/repos/runs), NestJS health + CRUD + OpenAPI
-    status: pending
+    status: completed
   - id: p0-auth
     content: Auth.js + OrgMembershipGuard + seed admin org
-    status: pending
+    status: completed
   - id: p0-clone-worker
     content: BullMQ clone queue, gwi-git bare clone, tar.zst to MinIO, run status updates
-    status: pending
+    status: completed
   - id: p0-web-shell
     content: Next.js login, repo list, connect form, run status polling
-    status: pending
+    status: completed
   - id: p0-adrs-tests
     content: Write Phase 0 ADRs + Compose integration test for clone E2E
-    status: pending
+    status: completed
 isProject: false
 ---
 

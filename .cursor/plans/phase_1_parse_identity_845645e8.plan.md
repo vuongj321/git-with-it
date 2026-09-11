@@ -4,22 +4,22 @@ overview: Build tree-sitter extractors for TypeScript/JavaScript and Python, a s
 todos:
   - id: p1-parse
     content: Implement gwi-parse tree-sitter extractors for TS/JS and Python with FQN rules
-    status: pending
+    status: completed
   - id: p1-link-git
     content: Implement gwi-link import resolution + gwi-git blob reads from bare repo
-    status: pending
+    status: completed
   - id: p1-entity-registry
     content: Postgres entities/appearances schema + UUIDv5 identity + analyzer_version
-    status: pending
+    status: completed
   - id: p1-blob-cache
     content: Content-addressed blob parse cache in MinIO
-    status: pending
+    status: completed
   - id: p1-neo4j-api
     content: Neo4j sha-tagged snapshot writer + graph slice query API
-    status: pending
+    status: completed
   - id: p1-pipeline-tests
     content: Wire parse/graph_write BullMQ jobs after clone; golden fixture CI
-    status: pending
+    status: completed
 isProject: false
 ---
 

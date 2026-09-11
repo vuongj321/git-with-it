@@ -28,8 +28,23 @@ When ETA to finish (or queue pressure) exceeds SLA budgets:
 | Clone bandwidth | Rate-limit concurrent clones per org; cache bare repos in S3 |
 | AI enqueue storms | Hard quotas (ADR 0018); circuit-break provider |
 
-## How to run (placeholder)
+## How to run
 
-- Scripted fixture repo + k6/vegeta against analyze APIs (staging only).
-- Capture: tip p50/p95, full-run wall time, error rate, $ proxy (worker minutes).
-- Store report under internal ops notes; update SLO targets if envelope shifts.
+Lightweight control-plane probe (Node built-ins; no k6 required):
+
+```bash
+# API must be up (and preferably seeded) — see docs/architecture/local-dev.md
+pnpm load-test
+# or: node scripts/load-test.mjs
+```
+
+| Env | Default | Meaning |
+|---|---|---|
+| `API_URL` | `http://localhost:4000` | API base |
+| `LOAD_TEST_CONCURRENCY` | `10` | Parallel GETs |
+| `LOAD_TEST_REQUESTS` | `50` | Total GETs against `/v1/orgs` |
+| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | seed defaults | Optional login via `/v1/auth/login` |
+
+The script checks `/health`, optionally authenticates, fires concurrent `/v1/orgs` GETs, prints p50/p95 latency and error rate, and exits non-zero if health fails or error rate > 5%.
+
+For heavier envelope tests (staging only): scripted fixture repo + k6/vegeta against analyze APIs; capture tip p50/p95, full-run wall time, error rate, and worker-minute cost; store under ops notes and update SLO targets if the envelope shifts.
