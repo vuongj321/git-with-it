@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { api, getToken, type Org, type Repo } from '@/lib/api';
+import { repoDisplayName } from '@/lib/repo';
 import { RepoNav } from '@/components/RepoNav';
 
 export default function RepoLayout({ children }: { children: React.ReactNode }) {
@@ -38,7 +39,7 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
       <header className="repo-header rise">
         <div>
           <h1 className="brand" style={{ fontSize: 'clamp(1.6rem, 3.5vw, 2.4rem)' }}>
-            Git With It
+            {repo ? repoDisplayName(repo.remoteUrl) : '…'}
           </h1>
           <p className="lede mono" style={{ marginTop: '0.4rem' }}>
             {repo?.remoteUrl ?? '…'}
