@@ -1,6 +1,6 @@
 # Git With It
 
-AI-powered software evolution platform. Phase 0–5: clone, parse/identity (TS/JS/Python/Go/Java), sampled evolution, ClickHouse metrics, product UI, AI insights, plus hardening (quotas, Temporal dual-run, tenancy, GitHub App tip sync, SCIP flag path).
+AI-powered software evolution platform. Clones repositories, extracts structure across TS/JS/Python/Go/Java, tracks evolution over sampled commits, and surfaces metrics, graphs, timelines, and grounded AI insights in a product UI.
 
 ## Prerequisites
 
@@ -63,7 +63,7 @@ infra/            docker-compose + ClickHouse init + terraform stub
 docs/adr/         Architecture Decision Records
 ```
 
-## Phase 3–4 APIs
+## API reference
 
 | Endpoint | Purpose |
 |---|---|
@@ -88,7 +88,7 @@ docs/adr/         Architecture Decision Records
 
 Insights are grounded in measured signals (metrics, diffs, evolution events)—not freeform repo chat.
 
-### Phase 5 ops knobs
+### Operations
 
 | Env | Purpose |
 |---|---|
@@ -109,3 +109,7 @@ Insights are grounded in measured signals (metrics, diffs, evolution events)—n
 | `pnpm build` / `lint` / `test` | Pipeline tasks |
 | `pnpm --filter @gwi/web test:e2e` | Playwright smoke (web server required) |
 | `make up` / `make down` | Compose data plane |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
