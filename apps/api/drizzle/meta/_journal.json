@@ -50,6 +50,13 @@
       "when": 1757610000000,
       "tag": "0006_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1757860000000,
+      "tag": "0007_personal_orgs_invites",
+      "breakpoints": true
     }
   ]
 }
