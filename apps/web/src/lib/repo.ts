@@ -2,7 +2,7 @@
 export function repoDisplayName(remoteUrl: string): string {
   const trimmed = remoteUrl.replace(/\.git$/i, '');
   const sshMatch = trimmed.match(/^[^@]+@[^:]+:(.+)$/);
-  if (sshMatch) return sshMatch[1];
+  if (sshMatch?.[1]) return sshMatch[1];
 
   try {
     const url = new URL(trimmed);
@@ -10,7 +10,7 @@ export function repoDisplayName(remoteUrl: string): string {
     if (parts.length >= 2) {
       return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
     }
-    if (parts.length === 1) return parts[0];
+    if (parts[0]) return parts[0];
   } catch {
     // Not a URL — fall through.
   }
