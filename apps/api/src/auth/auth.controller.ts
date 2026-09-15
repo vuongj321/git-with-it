@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Body,
-  ConflictException,
   Controller,
   Post,
   UnauthorizedException,
@@ -14,6 +13,7 @@ import { z } from 'zod';
 import { db } from '../db/client';
 import { users } from '../db/schema';
 import { OrgsService } from '../orgs/orgs.service';
+import { registerUser } from './register-user';
 import { signSessionToken } from './tokens';
 
 const LoginBody = z.object({
@@ -32,41 +32,22 @@ export class AuthController {
     if (!parsed.success) {
       throw new BadRequestException('Invalid registration payload');
     }
-    const email = parsed.data.email.trim().toLowerCase();
-    const { password, name, inviteToken } = parsed.data;
 
-    const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
-    if (existing[0]) {
-      throw new ConflictException('Email already registered');
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const [user] = await db
-      .insert(users)
-      .values({
-        email,
-        name: name?.trim() || null,
-        passwordHash,
-      })
-      .returning();
-
-    await this.orgs.provisionPersonalWorkspace(user!.id, {
-      email: user!.email,
-      name: user!.name,
+    const user = await registerUser(this.orgs, {
+      email: parsed.data.email,
+      password: parsed.data.password,
+      name: parsed.data.name,
+      inviteToken: parsed.data.inviteToken,
     });
 
-    if (inviteToken) {
-      await this.orgs.acceptInvite(inviteToken, user!.id, user!.email);
-    }
-
     const accessToken = await signSessionToken({
-      sub: user!.id,
-      email: user!.email,
-      name: user!.name,
+      sub: user.id,
+      email: user.email,
+      name: user.name,
     });
     return {
       accessToken,
-      user: { id: user!.id, email: user!.email, name: user!.name },
+      user: { id: user.id, email: user.email, name: user.name },
     };
   }
 

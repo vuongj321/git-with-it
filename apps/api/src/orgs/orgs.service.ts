@@ -3,12 +3,13 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { QuotasService } from '../billing/quotas.service';
 import { env } from '../config/env';
-import { db } from '../db/client';
+import { db, type DbOrTx } from '../db/client';
 import {
   memberships,
   orgInvites,
@@ -20,6 +21,7 @@ import {
 } from '../db/schema';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SLUG_INSERT_ATTEMPTS = 5;
 
 export function personalSlugForUser(userId: string): string {
   return `u-${userId.replace(/-/g, '').slice(0, 12)}`;
@@ -31,6 +33,15 @@ export function normalizeEmail(email: string): string {
 
 export function newInviteToken(): string {
   return randomBytes(32).toString('base64url');
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: unknown }).code === '23505'
+  );
 }
 
 function serializeOrg(org: Organization, role?: Membership['role']) {
@@ -50,8 +61,8 @@ export class OrgsService {
 
   serializeOrg = serializeOrg;
 
-  async findPersonalOrg(userId: string): Promise<Organization | null> {
-    const rows = await db
+  async findPersonalOrg(userId: string, exec: DbOrTx = db): Promise<Organization | null> {
+    const rows = await exec
       .select({ org: organizations })
       .from(memberships)
       .innerJoin(organizations, eq(organizations.id, memberships.orgId))
@@ -63,8 +74,13 @@ export class OrgsService {
   async provisionPersonalWorkspace(
     userId: string,
     opts?: { email?: string; name?: string | null },
+    exec?: DbOrTx,
   ): Promise<Organization> {
-    const existing = await this.findPersonalOrg(userId);
+    if (!exec) {
+      return db.transaction((tx) => this.provisionPersonalWorkspace(userId, opts, tx));
+    }
+
+    const existing = await this.findPersonalOrg(userId, exec);
     if (existing) return existing;
 
     const local =
@@ -72,41 +88,76 @@ export class OrgsService {
       (opts?.email ? opts.email.split('@')[0] : null) ||
       'Personal';
     const name = `${local}'s workspace`.slice(0, 120);
-    let slug = personalSlugForUser(userId);
-    const clash = await db
-      .select({ id: organizations.id })
-      .from(organizations)
-      .where(eq(organizations.slug, slug))
-      .limit(1);
-    if (clash[0]) {
-      slug = `${slug}-${randomBytes(2).toString('hex')}`;
+    const baseSlug = personalSlugForUser(userId);
+
+    let org: Organization | undefined;
+    let slug = baseSlug;
+    for (let attempt = 0; attempt < SLUG_INSERT_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        slug = `${baseSlug}-${randomBytes(2).toString('hex')}`;
+      } else {
+        const clash = await exec
+          .select({ id: organizations.id })
+          .from(organizations)
+          .where(eq(organizations.slug, slug))
+          .limit(1);
+        if (clash[0]) {
+          slug = `${baseSlug}-${randomBytes(2).toString('hex')}`;
+        }
+      }
+
+      try {
+        const [inserted] = await exec
+          .insert(organizations)
+          .values({ name, slug, kind: 'personal' })
+          .returning();
+        org = inserted;
+        break;
+      } catch (err) {
+        if (isUniqueViolation(err) && attempt < SLUG_INSERT_ATTEMPTS - 1) {
+          continue;
+        }
+        throw err;
+      }
     }
 
-    const [org] = await db
-      .insert(organizations)
-      .values({ name, slug, kind: 'personal' })
-      .returning();
-    await db.insert(memberships).values({
-      orgId: org!.id,
+    if (!org) {
+      throw new InternalServerErrorException('Failed to create personal workspace');
+    }
+
+    await exec.insert(memberships).values({
+      orgId: org.id,
       userId,
       role: 'owner',
     });
-    await this.quotas.ensureFreeSubscription(org!.id);
-    return org!;
+    await this.quotas.ensureFreeSubscription(org.id, exec);
+    return org;
   }
 
-  async createTeamOrg(userId: string, name: string, slug: string): Promise<Organization> {
-    const [org] = await db
+  async createTeamOrg(
+    userId: string,
+    name: string,
+    slug: string,
+    exec?: DbOrTx,
+  ): Promise<Organization> {
+    if (!exec) {
+      return db.transaction((tx) => this.createTeamOrg(userId, name, slug, tx));
+    }
+
+    const [org] = await exec
       .insert(organizations)
       .values({ name, slug, kind: 'team' })
       .returning();
-    await db.insert(memberships).values({
-      orgId: org!.id,
+    if (!org) {
+      throw new InternalServerErrorException('Failed to create organization');
+    }
+    await exec.insert(memberships).values({
+      orgId: org.id,
       userId,
       role: 'owner',
     });
-    await this.quotas.ensureFreeSubscription(org!.id);
-    return org!;
+    await this.quotas.ensureFreeSubscription(org.id, exec);
+    return org;
   }
 
   async listMine(userId: string) {
@@ -154,39 +205,38 @@ export class OrgsService {
     await this.requireTeamAdmin(input.orgId, input.invitedByUserId);
     const email = normalizeEmail(input.email);
 
-    const pending = await db
-      .select()
-      .from(orgInvites)
-      .where(
-        and(
-          eq(orgInvites.orgId, input.orgId),
-          eq(orgInvites.email, email),
-          eq(orgInvites.status, 'pending'),
-        ),
-      );
-    for (const row of pending) {
-      await db
+    return db.transaction(async (tx) => {
+      await tx
         .update(orgInvites)
         .set({ status: 'revoked' })
-        .where(eq(orgInvites.id, row.id));
-    }
+        .where(
+          and(
+            eq(orgInvites.orgId, input.orgId),
+            eq(orgInvites.email, email),
+            eq(orgInvites.status, 'pending'),
+          ),
+        );
 
-    const token = newInviteToken();
-    const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
-    const [invite] = await db
-      .insert(orgInvites)
-      .values({
-        orgId: input.orgId,
-        email,
-        role: input.role,
-        token,
-        invitedByUserId: input.invitedByUserId,
-        status: 'pending',
-        expiresAt,
-      })
-      .returning();
+      const token = newInviteToken();
+      const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
+      const [invite] = await tx
+        .insert(orgInvites)
+        .values({
+          orgId: input.orgId,
+          email,
+          role: input.role,
+          token,
+          invitedByUserId: input.invitedByUserId,
+          status: 'pending',
+          expiresAt,
+        })
+        .returning();
 
-    return this.serializeInviteCreated(invite!);
+      if (!invite) {
+        throw new InternalServerErrorException('Failed to create invite');
+      }
+      return this.serializeInviteCreated(invite);
+    });
   }
 
   serializeInviteCreated(invite: OrgInvite) {
@@ -255,11 +305,23 @@ export class OrgsService {
     };
   }
 
-  async loadInviteByToken(token: string): Promise<OrgInvite> {
-    const [invite] = await db.select().from(orgInvites).where(eq(orgInvites.token, token)).limit(1);
+  /**
+   * Fail-fast check before registration writes: invite must be pending/unexpired
+   * and addressed to the registering email.
+   */
+  async assertInviteAcceptable(token: string, userEmail: string): Promise<OrgInvite> {
+    const invite = await this.loadInviteByToken(token);
+    if (normalizeEmail(userEmail) !== normalizeEmail(invite.email)) {
+      throw new ForbiddenException('Invite email does not match your account');
+    }
+    return invite;
+  }
+
+  async loadInviteByToken(token: string, exec: DbOrTx = db): Promise<OrgInvite> {
+    const [invite] = await exec.select().from(orgInvites).where(eq(orgInvites.token, token)).limit(1);
     if (!invite) throw new NotFoundException('Invite not found');
     if (invite.status === 'pending' && invite.expiresAt.getTime() < Date.now()) {
-      await db.update(orgInvites).set({ status: 'expired' }).where(eq(orgInvites.id, invite.id));
+      await exec.update(orgInvites).set({ status: 'expired' }).where(eq(orgInvites.id, invite.id));
       throw new BadRequestException('Invite has expired');
     }
     if (invite.status !== 'pending') {
@@ -272,13 +334,22 @@ export class OrgsService {
    * Accept a pending team invite for the authenticated user.
    * Email on the session must match the invite (case-insensitive).
    */
-  async acceptInvite(token: string, userId: string, userEmail: string) {
-    const invite = await this.loadInviteByToken(token);
+  async acceptInvite(
+    token: string,
+    userId: string,
+    userEmail: string,
+    exec?: DbOrTx,
+  ): Promise<ReturnType<typeof serializeOrg>> {
+    if (!exec) {
+      return db.transaction((tx) => this.acceptInvite(token, userId, userEmail, tx));
+    }
+
+    const invite = await this.loadInviteByToken(token, exec);
     if (normalizeEmail(userEmail) !== normalizeEmail(invite.email)) {
       throw new ForbiddenException('Invite email does not match your account');
     }
 
-    const [org] = await db
+    const [org] = await exec
       .select()
       .from(organizations)
       .where(eq(organizations.id, invite.orgId))
@@ -287,7 +358,7 @@ export class OrgsService {
       throw new BadRequestException('Invite target is not a team organization');
     }
 
-    const [existing] = await db
+    const [existing] = await exec
       .select()
       .from(memberships)
       .where(and(eq(memberships.orgId, org.id), eq(memberships.userId, userId)))
@@ -295,14 +366,14 @@ export class OrgsService {
 
     if (!existing) {
       const role = invite.role === 'admin' ? 'admin' : 'member';
-      await db.insert(memberships).values({
+      await exec.insert(memberships).values({
         orgId: org.id,
         userId,
         role,
       });
     }
 
-    await db
+    await exec
       .update(orgInvites)
       .set({
         status: 'accepted',
