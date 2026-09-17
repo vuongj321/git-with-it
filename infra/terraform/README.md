@@ -8,7 +8,7 @@ Local/dev remains Docker Compose (`infra/docker-compose.yml`).
 
 | Env | Purpose |
 |---|---|
-| `staging` | Ephemeral demo repos, dual-run orchestrator soak (`ORCHESTRATOR`), lower quotas |
+| `staging` | Ephemeral demo repos, lower quotas |
 | `prod` | Paying tenants; PITR, stricter secret scan (`SECRET_SCAN_MODE=block`) |
 
 ## Layout
@@ -23,7 +23,6 @@ infra/terraform/
     neo4j/            # (outlined) Aura or self-managed operator binding
     clickhouse/       # (outlined) managed or operator
     s3/               # stub — artifacts + cold storage; versioning
-    temporal/         # (outlined) Temporal Cloud namespace + mTLS secrets wiring
     secrets/          # stub — KMS CMKs, ExternalSecrets hooks
   envs/
     staging/main.tf   # wires module stubs
@@ -33,8 +32,8 @@ infra/terraform/
 ## Dependency sketch
 
 - VPC → K8s + data stores in private subnets
-- K8s workloads pull images; consume PG, Redis, Neo4j, ClickHouse, S3, Temporal Cloud
-- IAM: least privilege per service account (`api`, `worker-ts`, `worker-rust`, `temporal-worker`, `web`)
+- K8s workloads pull images; consume PG, Redis, Neo4j, ClickHouse, S3
+- IAM: least privilege per service account (`api`, `worker-ts`, `worker-rust`, `web`)
 
 ## Out of scope for current stubs
 

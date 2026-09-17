@@ -23,8 +23,6 @@ spec:
           image: "{{ .Values.workerTs.image.repository }}:{{ .Values.workerTs.image.tag }}"
           imagePullPolicy: {{ .Values.workerTs.image.pullPolicy }}
           env:
-            - name: ORCHESTRATOR
-              value: {{ .Values.workerTs.env.ORCHESTRATOR | quote }}
             - name: SECRET_SCAN_MODE
               value: {{ .Values.workerTs.env.SECRET_SCAN_MODE | quote }}
 {{- end }}

@@ -13,7 +13,6 @@ api:
   service:
     port: 4000
   env:
-    ORCHESTRATOR: bullmq
     SECRET_SCAN_MODE: warn
 
 web:
@@ -34,7 +33,6 @@ workerTs:
     tag: latest
     pullPolicy: IfNotPresent
   env:
-    ORCHESTRATOR: bullmq
     SECRET_SCAN_MODE: warn
 
 workerRust:
@@ -44,13 +42,3 @@ workerRust:
     repository: ghcr.io/example/gwi-worker-rust
     tag: latest
     pullPolicy: IfNotPresent
-
-temporalWorker:
-  enabled: false
-  replicaCount: 1
-  image:
-    repository: ghcr.io/example/gwi-temporal-worker
-    tag: latest
-    pullPolicy: IfNotPresent
-  env:
-    ORCHESTRATOR: temporal
