@@ -2,7 +2,24 @@
 
 ## Status
 
-Accepted (Phase 5)
+Accepted (Phase 5) — amended: plan limits and enforcement are live; Stripe is **not** wired.
+
+## Amendment (post-Phase 5)
+
+Checked what actually shipped against the decision below:
+
+1. Plans/tiers, `subscriptions`, `usage_counters` and enforcement at analyze/AI enqueue are live
+   (`QuotasService.assertCanEnqueueAnalyze` / `assertCanEnqueueAi`, called from
+   `repos.controller.ts`).
+2. **Stripe Checkout was removed.** It was implemented (`POST /v1/billing/checkout`,
+   `STRIPE_SECRET_KEY`, `STRIPE_TEAM_PRICE_ID`) but no UI or deploy consumed it, so the route, the
+   env vars, and the `stripe_*` columns on `plans` / `subscriptions` are gone (migration
+   `0008_drop_unused_columns.sql`). Plan assignment is now manual: `POST /v1/billing/dev/attach-team`
+   (prod-guarded) or a direct `subscriptions` write.
+3. The "admin UI surfaces usage" clause is still open — only `GET /v1/billing/usage` exists.
+
+Reintroducing a payment provider should be its own ADR (webhook idempotency, dunning, proration are
+not small).
 
 ## Context
 

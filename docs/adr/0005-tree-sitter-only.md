@@ -10,7 +10,7 @@ High-fidelity indexers (SCIP/LSIF, `tsc`, language servers) produce precise call
 
 ## Decision
 
-Use **tree-sitter** grammars for TypeScript/JavaScript and Python in `gwi-parse`. Defer SCIP and compiler-based indexers until Phase 5 (optional precision path). Extraction emits `Symbol` / `UnresolvedRef` records; `gwi-link` resolves imports to FQNs without executing repository code.
+Use **tree-sitter** grammars for TypeScript/JavaScript and Python in `gwi-parse`. Extraction emits `Symbol` / `UnresolvedRef` records; `gwi-link` resolves imports to FQNs without executing repository code. SCIP / compiler-based indexers were prototyped in Phase 5 and then **rejected** — see [ADR 0017](0017-scip-optional-precision.md) (Rejected).
 
 ## Consequences
 

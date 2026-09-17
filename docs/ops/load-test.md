@@ -22,7 +22,7 @@ When ETA to finish (or queue pressure) exceeds SLA budgets:
 
 | Symptom | Action |
 |---|---|
-| Parse queue lag | Scale `worker-ts` / Temporal workers; check Neo4j single-writer leases |
+| Parse queue lag | Scale `worker-ts` (`parse_commit` concurrency); check Neo4j single-writer leases hold |
 | Neo4j CPU/disk | Confirm cold-age job; reduce hot symbol retention N; package rollups only for deep history |
 | ClickHouse insert lag | Batch size / partition checks; quota metric cardinality |
 | Clone bandwidth | Rate-limit concurrent clones per org; cache bare repos in S3 |
