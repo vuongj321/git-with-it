@@ -1,10 +1,11 @@
 import {
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { and, count, eq, sql } from 'drizzle-orm';
-import { db } from '../db/client';
+import { db, type DbOrTx } from '../db/client';
 import {
   organizations,
   plans,
@@ -181,18 +182,18 @@ export class QuotasService {
       .where(and(eq(usageCounters.orgId, orgId), eq(usageCounters.periodYm, periodYm)));
   }
 
-  async ensureFreeSubscription(orgId: string) {
-    const [existing] = await db
+  async ensureFreeSubscription(orgId: string, exec: DbOrTx = db) {
+    const [existing] = await exec
       .select()
       .from(subscriptions)
       .where(eq(subscriptions.orgId, orgId))
       .limit(1);
     if (existing) return existing;
-    const [free] = await db.select().from(plans).where(eq(plans.tier, 'free')).limit(1);
+    const [free] = await exec.select().from(plans).where(eq(plans.tier, 'free')).limit(1);
     if (!free) {
       throw new ServiceUnavailableException('plans table not seeded; run migrations');
     }
-    const [created] = await db
+    const [created] = await exec
       .insert(subscriptions)
       .values({
         orgId,
@@ -200,7 +201,10 @@ export class QuotasService {
         status: 'active',
       })
       .returning();
-    return created!;
+    if (!created) {
+      throw new InternalServerErrorException('Failed to create free subscription');
+    }
+    return created;
   }
 
   async orgFeatures(orgId: string): Promise<Record<string, unknown>> {
