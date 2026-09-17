@@ -6,7 +6,7 @@
 |---|---|---|
 | API availability | ≥ 99.9% monthly | `/health` + authenticated critical routes; exclude planned maintenance |
 | Analyze tip latency | p50 ≤ 2 min, p95 ≤ 10 min | Tip graph_ready for median demo-sized repos; exclude cold start / first clone of huge repos |
-| Queue / workflow lag | p95 time-to-start ≤ 60 s | BullMQ wait or Temporal schedule-to-start for analysis |
+| Queue / workflow lag | p95 time-to-start ≤ 60 s | BullMQ `waiting` → `active` lag per queue |
 
 Tighten or split by plan/tier once production baselines exist.
 
@@ -25,6 +25,6 @@ Tighten or split by plan/tier once production baselines exist.
 
 ## Observability
 
-- OpenTelemetry traces: API → orchestrator (BullMQ/Temporal) → workers
+- OpenTelemetry traces: API → BullMQ → workers
 - Dashboards: tip latency, queue depth, Neo4j/ClickHouse saturation, AI spend proxies
 - Page on P1; ticket/Slack for P2/P3 with runbook links

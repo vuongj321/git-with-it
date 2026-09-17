@@ -109,7 +109,6 @@ export type Repo = {
   cloneUri: string | null;
   lastSyncedSha: string | null;
   lastError: string | null;
-  precisionMode?: 'structural' | 'scip' | string;
   features?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

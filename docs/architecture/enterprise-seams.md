@@ -20,11 +20,11 @@ Design-only. Do not build full product unless a design partner funds it. APIs ma
 ## VPC / private link
 
 - Private connectivity to customer Git hosts and/or private GWI endpoints.
-- No shared-worker execution of customer build scripts (still parse-only / SCIP policy).
+- No shared-worker execution of customer build scripts (parse-only; SCIP tiers rejected — ADR 0017).
 
 ## Data residency
 
-- Region pin per org (`us`, `eu`, …): PG, object store, Neo4j, ClickHouse, Temporal namespace.
+- Region pin per org (`us`, `eu`, …): PG, object store, Neo4j, ClickHouse.
 - Cross-region replication off by default for Enterprise residency contracts.
 
 ## Portfolio (multi-repo)

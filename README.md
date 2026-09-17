@@ -7,7 +7,7 @@ AI-powered software evolution platform. Clones repositories, extracts structure 
 - Node.js 20+
 - [pnpm](https://pnpm.io) 9.15+
 - Docker + Docker Compose
-- Rust toolchain (for `gwi-git` / parse / metrics crates; see `rust-toolchain.toml`)
+- Rust toolchain (for the `gwi-git` / `gwi-parse` / `gwi-link` / `gwi-graph` crates; see `rust-toolchain.toml`)
 - System `git` on PATH (used by `gwi-git`)
 
 > **Windows note:** Prefer WSL2 or run the worker inside Docker. OneDrive-synced paths can break ephemeral git workspaces.
@@ -20,7 +20,7 @@ make up          # Postgres, Redis, MinIO, Neo4j, ClickHouse
 pnpm install
 pnpm db:migrate
 pnpm db:seed
-cargo build -p gwi-git -p gwi-parse -p gwi-link -p gwi-graph -p gwi-metrics --release
+cargo build -p gwi-git -p gwi-parse -p gwi-link -p gwi-graph --release
 # put target/release/* on PATH, or set GWI_GIT_BIN / GWI_PARSE_BIN / …
 pnpm dev
 ```
@@ -58,9 +58,8 @@ crates/gwi-git    Bare clone / fetch / blob / first-parent log / diff-tree
 crates/gwi-parse  tree-sitter TS/JS + Python + Go + Java extractors
 crates/gwi-link   Import → FQN resolution
 crates/gwi-graph  Package/file graph builder
-crates/gwi-metrics Architectural metrics from graph snapshots
 testdata/         Mini repos + golden parse / evolution / metrics fixtures
-packages/*        shared-types (sampling, gwi-diff, events, metrics, insights), tsconfig, eslint
+packages/*        shared-types (sampling, gwi-diff, events, metrics, insights), tsconfig
 infra/            docker-compose + ClickHouse init + terraform stub
 docs/adr/         Architecture Decision Records
 ```
@@ -85,7 +84,6 @@ docs/adr/         Architecture Decision Records
 
 | `POST /v1/repos/:id/insights/:insightId/dismiss` | Dismiss / snooze / feedback |
 | `GET /v1/billing/usage?orgId=` | Plan + usage counters |
-| `POST /v1/billing/checkout` | Stripe Team Checkout (or mock) |
 | `POST /v1/github/webhook` | GitHub App push → tip reanalyze |
 
 Insights are grounded in measured signals (metrics, diffs, evolution events)—not freeform repo chat.
@@ -94,10 +92,12 @@ Insights are grounded in measured signals (metrics, diffs, evolution events)—n
 
 | Env | Purpose |
 |---|---|
-| `ORCHESTRATOR` | `bullmq` (default) or `temporal` dual-run |
 | `SECRET_SCAN_MODE` | `off` \| `warn` \| `block` on clone |
-| `STRIPE_*` | Team billing Checkout |
 | `GITHUB_WEBHOOK_SECRET` | Hub signature verification |
+
+Orchestration is BullMQ only; there is no billing provider wired (see [ADR 0016](docs/adr/0016-temporal-analysis-workflows.md) and [ADR 0018](docs/adr/0018-quotas-plans.md)).
+
+**New here? Read [docs/architecture/how-it-works.md](docs/architecture/how-it-works.md)** — the live pipeline, the five stores, and the traps.
 
 ## Product routes
 

@@ -54,10 +54,6 @@ import { queryGraphSlice } from '../graph/neo4j';
 import { JobsService } from '../jobs/jobs.service';
 import { QuotasService } from '../billing/quotas.service';
 import {
-  orchestratorMode,
-  startAnalysisWorkflow,
-} from '../temporal/client';
-import {
   queryCycleMembers,
   queryHeatmap,
   queryMetricDelta,
@@ -861,16 +857,11 @@ export class ReposController {
       encryptedPat: repo.encryptedPat ?? undefined,
     };
 
-    if (orchestratorMode() === 'temporal') {
-      await startAnalysisWorkflow(clonePayload);
-    } else {
-      await this.jobsService.enqueueClone(clonePayload);
-    }
+    await this.jobsService.enqueueClone(clonePayload);
 
     return {
       run: serializeRun(run!),
       job: { id: job!.id, status: job!.status },
-      orchestrator: orchestratorMode(),
     };
   }
 
@@ -1054,7 +1045,6 @@ function serializeRepo(repo: typeof repositories.$inferSelect) {
     cloneUri: repo.cloneUri,
     lastSyncedSha: repo.lastSyncedSha,
     lastError: repo.lastError,
-    precisionMode: repo.precisionMode ?? 'structural',
     features: repo.features ?? {},
     createdAt: repo.createdAt.toISOString(),
     updatedAt: repo.updatedAt.toISOString(),

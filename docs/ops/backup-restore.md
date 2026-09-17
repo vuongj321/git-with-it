@@ -25,7 +25,7 @@
 When Neo4j or graph artifacts for a repo are lost/corrupt:
 
 1. Confirm bare clone / fetch still available in object store or re-clone via App/PAT.
-2. Enqueue full resample analyze with current `analyzer_version` (orchestrator flag unchanged).
+2. Enqueue full resample analyze with current `analyzer_version` (BullMQ only).
 3. Wait tip `graph_ready`; backfill samples; verify package graph + metrics row counts.
 4. Re-run cold-age job if retention requires (ADR 0019).
 5. Document incident; do not restore Neo4j from backup *and* rebuild the same repo without clearing stale nodes.

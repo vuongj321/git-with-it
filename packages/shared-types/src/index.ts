@@ -25,14 +25,14 @@ export const RepositoryStatus = z.enum([
 ]);
 export type RepositoryStatus = z.infer<typeof RepositoryStatus>;
 
+/**
+ * Live BullMQ queues only. Legacy names kept in the Postgres `job_type` enum
+ * (see apps/api/src/db/schema.ts) cannot be dropped without recreating the type.
+ */
 export const JobType = z.enum([
   'clone',
   'enumerate_sample',
-  'parse',
   'parse_commit',
-  'graph_write',
-  'graph_write_delta',
-  'checkpoint',
   'metrics_write',
   'evolve',
   'ai',
@@ -196,17 +196,6 @@ export type EnumerateSampleJobPayload = z.infer<
   typeof EnumerateSampleJobPayloadSchema
 >;
 
-export const ParseJobPayloadSchema = z.object({
-  jobId: z.string().uuid(),
-  runId: z.string().uuid(),
-  repoId: z.string().uuid(),
-  orgId: z.string().uuid(),
-  commitSha: z.string().min(7),
-  cloneUri: z.string().min(1),
-  analyzerVersion: z.string().min(1),
-});
-export type ParseJobPayload = z.infer<typeof ParseJobPayloadSchema>;
-
 /** Multi-commit evolution parse (one sample or a batch). */
 export const ParseCommitJobPayloadSchema = z.object({
   jobId: z.string().uuid(),
@@ -220,16 +209,6 @@ export const ParseCommitJobPayloadSchema = z.object({
   sampleConfig: SampleConfigSchema.partial().optional(),
 });
 export type ParseCommitJobPayload = z.infer<typeof ParseCommitJobPayloadSchema>;
-
-export const GraphWriteJobPayloadSchema = z.object({
-  jobId: z.string().uuid(),
-  runId: z.string().uuid(),
-  repoId: z.string().uuid(),
-  orgId: z.string().uuid(),
-  commitSha: z.string().min(7),
-  analyzerVersion: z.string().min(1),
-});
-export type GraphWriteJobPayload = z.infer<typeof GraphWriteJobPayloadSchema>;
 
 export const MetricsWriteJobPayloadSchema = z.object({
   jobId: z.string().uuid(),

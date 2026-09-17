@@ -26,8 +26,6 @@ spec:
             - name: http
               containerPort: {{ .Values.api.service.port }}
           env:
-            - name: ORCHESTRATOR
-              value: {{ .Values.api.env.ORCHESTRATOR | quote }}
             - name: SECRET_SCAN_MODE
               value: {{ .Values.api.env.SECRET_SCAN_MODE | quote }}
 {{- end }}

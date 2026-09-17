@@ -33,7 +33,7 @@ const FREE_DEFAULTS: Pick<
 @Injectable()
 export class QuotasService {
   async resolvePlan(orgId: string): Promise<{
-    plan: typeof FREE_DEFAULTS & { id?: string; stripePriceId?: string | null };
+    plan: typeof FREE_DEFAULTS & { id?: string };
     inGrace: boolean;
   }> {
     const [sub] = await db
@@ -46,7 +46,6 @@ export class QuotasService {
         maxRepos: plans.maxRepos,
         maxParseMinutesMonth: plans.maxParseMinutesMonth,
         maxAiCallsMonth: plans.maxAiCallsMonth,
-        stripePriceId: plans.stripePriceId,
         id: plans.id,
       })
       .from(subscriptions)
@@ -65,7 +64,6 @@ export class QuotasService {
               maxRepos: free.maxRepos,
               maxParseMinutesMonth: free.maxParseMinutesMonth,
               maxAiCallsMonth: free.maxAiCallsMonth,
-              stripePriceId: free.stripePriceId,
             }
           : FREE_DEFAULTS,
         inGrace: true,
@@ -85,7 +83,6 @@ export class QuotasService {
         maxRepos: sub.maxRepos,
         maxParseMinutesMonth: sub.maxParseMinutesMonth,
         maxAiCallsMonth: sub.maxAiCallsMonth,
-        stripePriceId: sub.stripePriceId,
       },
       inGrace,
     };

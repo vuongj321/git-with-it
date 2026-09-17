@@ -2,22 +2,43 @@
 
 ## Status
 
-Accepted (Phase 5) — evolves ADR 0001
+**Rejected** — reverted to [ADR 0001](0001-modular-monolith-bullmq.md). Scaffolding deleted.
 
 ## Context
 
-BullMQ + Redis works for clone and short jobs, but multi-stage analysis (clone → sample → parse → graph → metrics → evolve → AI) needs durable sagas: heartbeats, cancel from UI, child batch workflows, and resume after worker death. ADR 0001 deferred Temporal; Phase 5 hardens orchestration.
+BullMQ + Redis works for clone and short jobs, but multi-stage analysis (clone → enumerate_sample →
+parse_commit → metrics_write → evolve → ai) can need durable sagas: heartbeats, cancel from UI,
+child batch workflows, and resume after worker death. Phase 5 proposed Temporal for this and a
+dual-run client/worker scaffold was written behind `ORCHESTRATOR=temporal`.
 
-## Decision
+## Decision (as proposed, never adopted)
 
-1. **Temporal** is the system of record for analysis workflows (`AnalysisRun` and child shard batches). Activities wrap existing worker stages (`clone` → `enumerate` → `parse_commit` → `metrics` → `evolve` → `ai`); idempotency keys remain `(repo_id, analyzer_version, sha, stage)`.
-2. **Dual-run then cutover:** staging runs BullMQ and Temporal in parallel for soak; production cutover via env `ORCHESTRATOR=bullmq|temporal` (default `bullmq` until soak passes). Worker entry: `apps/worker-ts/src/temporal-worker.ts`.
-3. After cutover, BullMQ is retained only for light jobs (webhooks, email, Stripe) or removed once unused.
+1. Temporal as the system of record for analysis workflows (`AnalysisRun` and child shard batches);
+   activities wrap existing worker stages; idempotency keys stay `(repo_id, analyzer_version, sha, stage)`.
+2. Dual-run then cutover via env `ORCHESTRATOR=bullmq|temporal` (default `bullmq`), worker entry
+   `apps/worker-ts/src/temporal-worker.ts`.
+3. After cutover, BullMQ retained only for light jobs (webhooks, email).
 4. Long parse batches heartbeat; UI cancel maps to Temporal terminate/cancel.
+
+## Why it was rejected
+
+- **The soak never ran.** No environment ever set `ORCHESTRATOR=temporal`, so the second orchestrator
+  only added drift: two code paths for one pipeline, kept in sync by hand.
+- **The reliability gap is already covered.** Stages are idempotent at
+  `(repo_id, analyzer_version, sha, stage)`, run state is mirrored in Postgres
+  (`analysis_runs` / `jobs`), BullMQ retries with exponential backoff, and per-repo Neo4j writes are
+  serialized by a Redis lease ([ADR 0011](0011-single-writer-neo4j.md)).
+- **Operator surface doubled** (Temporal Cloud/self-host, namespace, mTLS secrets) with no measured
+  driver. `@temporalio/*` were never declared dependencies — the paths only worked if someone
+  installed them by hand.
 
 ## Consequences
 
-- Operator surface grows (Temporal Cloud or self-host); local DX may keep BullMQ via flag.
-- Chaos kill mid-run must resume without duplicate Neo4j/ClickHouse writes (activity idempotency tests required).
-- Job mirror / run status in Postgres continues to serve UI; Temporal history is authoritative for workflow state.
-- `@temporalio/client` (API) and `@temporalio/worker` (worker-ts) are optional installs until cutover.
+- Deleted: `apps/api/src/temporal/**`, `apps/worker-ts/src/temporal/**`,
+  `apps/worker-ts/src/temporal-worker.ts`, and the `ORCHESTRATOR`, `TEMPORAL_ADDRESS`,
+  `TEMPORAL_NAMESPACE`, `TEMPORAL_TASK_QUEUE` env vars. `POST /v1/repos/:id/analyze` no longer
+  returns an `orchestrator` field.
+- Long-run cancellation and cross-stage resume stay best-effort/manual. If durable sagas become a
+  real requirement, reopen this with a measured failure mode (e.g. worker loss mid-parse) rather
+  than a design preference.
+
