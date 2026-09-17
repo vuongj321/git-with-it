@@ -17,6 +17,12 @@ test.describe('Phase 3 product routes', () => {
     await expect(page.locator('body')).toContainText(/Git With It|Sign|Login|email/i);
   });
 
+  test('signup page loads', async ({ page }) => {
+    const res = await page.goto('/signup');
+    expect(res?.ok()).toBeTruthy();
+    await expect(page.locator('body')).toContainText(/Create account|Sign up|workspace/i);
+  });
+
   test('repo section paths are routable (redirect to login when unauthenticated)', async ({
     page,
   }) => {

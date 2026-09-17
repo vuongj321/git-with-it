@@ -122,12 +122,23 @@ export const subscriptionStatusEnum = pgEnum('subscription_status', [
   'trialing',
 ]);
 
+export const orgKindEnum = pgEnum('org_kind', ['personal', 'team']);
+
+export const inviteStatusEnum = pgEnum('invite_status', [
+  'pending',
+  'accepted',
+  'revoked',
+  'expired',
+]);
+
 export const organizations = pgTable(
   'organizations',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
+    /** personal = individual workspace; team = shared analysis */
+    kind: orgKindEnum('kind').notNull().default('team'),
     /** Feature flags: scip_enabled, etc. */
     features: jsonb('features').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -604,6 +615,35 @@ export const webhookEndpoints = pgTable(
   (t) => [index('webhook_endpoints_org_idx').on(t.orgId)],
 );
 
+/** Email invites into team orgs (never personal workspaces). */
+export const orgInvites = pgTable(
+  'org_invites',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    role: membershipRoleEnum('role').notNull().default('member'),
+    token: text('token').notNull(),
+    invitedByUserId: uuid('invited_by_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: inviteStatusEnum('status').notNull().default('pending'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    acceptedByUserId: uuid('accepted_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('org_invites_token_uidx').on(t.token),
+    index('org_invites_org_idx').on(t.orgId),
+    index('org_invites_email_idx').on(t.email),
+  ],
+);
+
 export type Organization = typeof organizations.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
@@ -626,3 +666,4 @@ export type UsageCounter = typeof usageCounters.$inferSelect;
 export type GithubAppInstall = typeof githubAppInstalls.$inferSelect;
 export type GithubRepoLink = typeof githubRepoLinks.$inferSelect;
 export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect;
+export type OrgInvite = typeof orgInvites.$inferSelect;

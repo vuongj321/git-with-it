@@ -95,6 +95,16 @@ export type InsightStatus = z.infer<typeof InsightStatus>;
 export const MembershipRole = z.enum(['owner', 'admin', 'member']);
 export type MembershipRole = z.infer<typeof MembershipRole>;
 
+export const OrgKind = z.enum(['personal', 'team']);
+export type OrgKind = z.infer<typeof OrgKind>;
+
+export const InviteStatus = z.enum(['pending', 'accepted', 'revoked', 'expired']);
+export type InviteStatus = z.infer<typeof InviteStatus>;
+
+/** Roles that can be granted via invite (never owner). */
+export const InviteRole = z.enum(['admin', 'member']);
+export type InviteRole = z.infer<typeof InviteRole>;
+
 export const SampleConfigSchema = z.object({
   /** Always include tip. Last N first-parent commits (default 100). */
   lastN: z.number().int().min(1).max(10_000).default(100),
@@ -140,6 +150,25 @@ export const CreateOrgBodySchema = z.object({
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
 });
 export type CreateOrgBody = z.infer<typeof CreateOrgBodySchema>;
+
+export const RegisterBodySchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8).max(200),
+  name: z.string().min(1).max(120).optional(),
+  inviteToken: z.string().min(16).max(200).optional(),
+});
+export type RegisterBody = z.infer<typeof RegisterBodySchema>;
+
+export const CreateInviteBodySchema = z.object({
+  email: z.string().email(),
+  role: InviteRole.optional().default('member'),
+});
+export type CreateInviteBody = z.infer<typeof CreateInviteBodySchema>;
+
+export const AcceptInviteBodySchema = z.object({
+  token: z.string().min(16).max(200),
+});
+export type AcceptInviteBody = z.infer<typeof AcceptInviteBodySchema>;
 
 export const CloneJobPayloadSchema = z.object({
   jobId: z.string().uuid(),

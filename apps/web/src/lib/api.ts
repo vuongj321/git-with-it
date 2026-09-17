@@ -69,7 +69,36 @@ export async function api<T>(
   return res.json() as Promise<T>;
 }
 
-export type Org = { id: string; name: string; slug: string; createdAt: string };
+export type Org = {
+  id: string;
+  name: string;
+  slug: string;
+  kind?: 'personal' | 'team';
+  role?: 'owner' | 'admin' | 'member';
+  createdAt: string;
+};
+
+export type OrgInvite = {
+  id: string;
+  orgId: string;
+  email: string;
+  role: string;
+  status: string;
+  token?: string;
+  expiresAt: string;
+  acceptUrl?: string;
+  acceptedAt?: string | null;
+  createdAt: string;
+};
+
+export type InvitePreview = {
+  orgId: string;
+  orgName: string;
+  orgSlug: string;
+  email: string;
+  role: string;
+  expiresAt: string;
+};
 export type Repo = {
   id: string;
   orgId: string;

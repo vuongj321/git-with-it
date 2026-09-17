@@ -1,12 +1,17 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, Suspense, useState } from 'react';
 import { getSession, signIn } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
-import { api, setToken } from '@/lib/api';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { api, setToken, type Org } from '@/lib/api';
+import { preferWorkspaceSlug } from '@/lib/orgs';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const search = useSearchParams();
+  const inviteToken = search.get('invite') ?? '';
+
   const [email, setEmail] = useState('admin@git-with-it.local');
   const [password, setPassword] = useState('admin1234');
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +31,6 @@ export default function LoginPage() {
         throw new Error('Invalid email or password');
       }
 
-      // Nest JWT for Bearer calls — prefer session (already fetched in authorize), else login again.
       const session = await getSession();
       if (typeof session?.accessToken === 'string' && session.accessToken.length > 0) {
         setToken(session.accessToken);
@@ -39,8 +43,20 @@ export default function LoginPage() {
         setToken(login.accessToken);
       }
 
-      const orgs = await api<Array<{ slug: string }>>('/v1/orgs');
-      const slug = orgs[0]?.slug ?? 'demo';
+      if (inviteToken) {
+        const org = await api<Org>('/v1/orgs/invites/accept', {
+          method: 'POST',
+          body: JSON.stringify({ token: inviteToken }),
+        });
+        router.push(`/${org.slug}/repos`);
+        return;
+      }
+
+      const orgs = await api<Org[]>('/v1/orgs');
+      const slug = preferWorkspaceSlug(orgs);
+      if (!slug) {
+        throw new Error('No workspace found — try signing up');
+      }
       router.push(`/${slug}/repos`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -53,7 +69,9 @@ export default function LoginPage() {
     <main className="shell">
       <h1 className="brand rise">Git With It</h1>
       <p className="lede rise-delay">
-        Sign in to connect a repository and watch a bare clone land in object storage.
+        {inviteToken
+          ? 'Sign in to accept your team invite.'
+          : 'Sign in to connect a repository and watch a bare clone land in object storage.'}
       </p>
       <form className="panel stack rise-delay" onSubmit={onSubmit}>
         <div>
@@ -88,9 +106,23 @@ export default function LoginPage() {
           <button className="btn" type="submit" disabled={pending}>
             {pending ? 'Signing in…' : 'Sign in'}
           </button>
+          <Link
+            className="btn btn-ghost"
+            href={inviteToken ? `/signup?invite=${inviteToken}` : '/signup'}
+          >
+            Create account
+          </Link>
         </div>
         {error ? <p className="error">{error}</p> : null}
       </form>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="shell">Loading…</main>}>
+      <LoginForm />
+    </Suspense>
   );
 }

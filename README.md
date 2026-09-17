@@ -30,7 +30,9 @@ pnpm dev
 - MinIO console: http://localhost:9001 (`gwiadmin` / `gwiadmin123`)
 - ClickHouse HTTP: http://localhost:8123
 
-Default login after seed: `admin@git-with-it.local` / `admin1234` (org slug `demo`).
+Default login after seed: `admin@git-with-it.local` / `admin1234`. Seed creates a **personal workspace** for the admin plus team org slug `demo` (for shared analysis / invites).
+
+**Accounts:** `POST /v1/auth/register` creates a user and personal workspace (`organizations.kind=personal`). Team orgs are optional (`POST /v1/orgs`); join via email invite (`POST /v1/orgs/:id/invites` → `/invite/[token]`). See [ADR 0023](docs/adr/0023-personal-workspaces-invites.md).
 
 See [docs/architecture/local-dev.md](docs/architecture/local-dev.md) for ports and service details.
 

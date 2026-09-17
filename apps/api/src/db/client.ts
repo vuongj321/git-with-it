@@ -16,3 +16,8 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 export const db = drizzle(pool, { schema });
+
+export type Db = typeof db;
+/** Drizzle transaction client from `db.transaction(async (tx) => ...)`. */
+export type DbTransaction = Parameters<Parameters<Db['transaction']>[0]>[0];
+export type DbOrTx = Db | DbTransaction;
