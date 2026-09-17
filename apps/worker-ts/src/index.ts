@@ -4,21 +4,17 @@ import {
   CloneJobPayloadSchema,
   EnumerateSampleJobPayloadSchema,
   EvolveJobPayloadSchema,
-  GraphWriteJobPayloadSchema,
   MetricsWriteJobPayloadSchema,
   ParseCommitJobPayloadSchema,
-  ParseJobPayloadSchema,
 } from '@gwi/shared-types';
 import { processAiGenerateJob } from './ai';
 import { processCloneJob } from './clone';
 import { processEnumerateSampleJob } from './enumerate';
 import { env } from './env';
 import { processEvolveJob } from './evolve';
-import { processGraphWriteJob } from './graph-write';
 import { logger } from './logger';
 import { processMetricsWriteJob } from './metrics-write';
 import { processParseCommitJob } from './parse-commit';
-import { processParseJob } from './parse';
 
 logger.info(
   { ai_provider: env.AI_PROVIDER, ai_model: env.AI_MODEL },
@@ -45,15 +41,6 @@ const enumerateWorker = new Worker(
   { connection, concurrency: 1 },
 );
 
-const parseWorker = new Worker(
-  'parse',
-  async (job) => {
-    const payload = ParseJobPayloadSchema.parse(job.data);
-    await processParseJob(payload);
-  },
-  { connection, concurrency: 1 },
-);
-
 /**
  * Neo4j deltas: per-repo Redis lease (ADR 0011) allows multi-repo concurrency.
  * Same-repo jobs still serialize via withRepoNeo4jLock inside the processor.
@@ -65,15 +52,6 @@ const parseCommitWorker = new Worker(
     await processParseCommitJob(payload);
   },
   { connection, concurrency: 4 },
-);
-
-const graphWorker = new Worker(
-  'graph_write',
-  async (job) => {
-    const payload = GraphWriteJobPayloadSchema.parse(job.data);
-    await processGraphWriteJob(payload);
-  },
-  { connection, concurrency: 1 },
 );
 
 const metricsWorker = new Worker(
@@ -106,9 +84,7 @@ const aiWorker = new Worker(
 for (const [name, worker] of [
   ['clone', cloneWorker],
   ['enumerate_sample', enumerateWorker],
-  ['parse', parseWorker],
   ['parse_commit', parseCommitWorker],
-  ['graph_write', graphWorker],
   ['metrics_write', metricsWorker],
   ['evolve', evolveWorker],
   ['ai', aiWorker],
@@ -127,9 +103,7 @@ async function shutdown() {
   await Promise.all([
     cloneWorker.close(),
     enumerateWorker.close(),
-    parseWorker.close(),
     parseCommitWorker.close(),
-    graphWorker.close(),
     metricsWorker.close(),
     evolveWorker.close(),
     aiWorker.close(),
