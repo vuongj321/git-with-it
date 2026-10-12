@@ -7,10 +7,10 @@ import { AppModule } from './app.module';
 import { env } from './config/env';
 
 async function bootstrap() {
-  // OTel stub — wire real SDK when exporter endpoint is set
+  // OTel exporter (stub)
   if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
     console.log(
-      `OTel exporter configured at ${env.OTEL_EXPORTER_OTLP_ENDPOINT} (stub; SDK lands with Temporal cutover)`,
+      `OTel exporter configured at ${env.OTEL_EXPORTER_OTLP_ENDPOINT} (stub)`,
     );
   }
 
@@ -37,7 +37,7 @@ async function bootstrap() {
 
   const swagger = new DocumentBuilder()
     .setTitle('Git With It API')
-    .setDescription('Phase 0–5 control plane')
+    .setDescription('Control plane API')
     .setVersion('0.5.0')
     .addBearerAuth()
     .build();

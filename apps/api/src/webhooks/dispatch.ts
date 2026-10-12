@@ -73,7 +73,7 @@ export async function orgIdForRepo(repoId: string): Promise<string | null> {
   return row?.orgId ?? null;
 }
 
-/** Ensure org row exists (for typing / future filters). */
+/** Ensure the org row exists. */
 export async function assertOrg(orgId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: organizations.id })

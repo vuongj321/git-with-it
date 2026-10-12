@@ -66,7 +66,7 @@ function toEntityIds(
 }
 
 /**
- * Deterministic evolution event rules (no LLM). See ADR 0010.
+ * Deterministic evolution event rules (no LLM).
  * `entityIds` are always product UUIDv5 ids (never raw graph node ids).
  */
 export function eventsFromDiff(

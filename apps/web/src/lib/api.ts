@@ -170,7 +170,7 @@ export type GraphSlice = {
   edges: GraphEdgeDto[];
   /** Server-side node cap hit (API field name). */
   capped?: boolean;
-  /** Alias some clients used historically. */
+  /** Alias for some clients. */
   truncated?: boolean;
   focus?: string | null;
   depth?: number | null;

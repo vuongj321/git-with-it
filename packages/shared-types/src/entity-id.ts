@@ -1,5 +1,5 @@
 /**
- * Deterministic entity IDs (UUIDv5) — see ADR 0006.
+ * Deterministic entity IDs (UUIDv5).
  *
  * Namespace = UUIDv5(DNS_NAMESPACE, "git-with-it.entity.v1")
  *   DNS_NAMESPACE = 6ba7b810-9dad-11d1-80b4-00c04fd430c8

@@ -25,10 +25,7 @@ export const RepositoryStatus = z.enum([
 ]);
 export type RepositoryStatus = z.infer<typeof RepositoryStatus>;
 
-/**
- * Live BullMQ queues only. Legacy names kept in the Postgres `job_type` enum
- * (see apps/api/src/db/schema.ts) cannot be dropped without recreating the type.
- */
+/** BullMQ job queue names. */
 export const JobType = z.enum([
   'clone',
   'enumerate_sample',
@@ -118,7 +115,7 @@ export const SampleConfigSchema = z.object({
   couplingDeltaThreshold: z.number().int().min(1).default(5),
   /**
    * Soft SLA (minutes) for tip-path parse; triggers sample density backoff
-   * when estimated duration exceeds this (Phase 5).
+   * when estimated duration exceeds this.
    */
   slaMinutes: z.number().int().min(1).max(240).default(30),
   /** Rough seconds per sampled commit for ETA (local calibration). */

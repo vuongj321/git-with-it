@@ -51,7 +51,7 @@ export async function invalidateRepoCaches(repoId: string) {
   }
 }
 
-/** Blueprint §17 cache keys */
+/** Cache keys for graph and metrics responses */
 export function graphCacheKey(
   repoId: string,
   sha: string,

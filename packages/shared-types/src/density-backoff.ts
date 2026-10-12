@@ -1,5 +1,5 @@
 /**
- * Sample density backoff when ETA exceeds SLA (Phase 5).
+ * Sample density backoff when ETA exceeds SLA.
  *
  * Reduces `lastN` (and disables monthly anchors at the lowest tier) so tip-first
  * progressive delivery stays within the analyze tip latency budget.

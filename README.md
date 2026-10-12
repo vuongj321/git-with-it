@@ -32,7 +32,7 @@ pnpm dev
 
 Default login after seed: `admin@git-with-it.local` / `admin1234`. Seed creates a **personal workspace** for the admin plus team org slug `demo` (for shared analysis / invites).
 
-**Accounts:** `POST /v1/auth/register` creates a user and personal workspace (`organizations.kind=personal`). Team orgs are optional (`POST /v1/orgs`); join via email invite (`POST /v1/orgs/:id/invites` → `/invite/[token]`). See [ADR 0023](docs/adr/0023-personal-workspaces-invites.md).
+**Accounts:** `POST /v1/auth/register` creates a user and personal workspace (`organizations.kind=personal`). Team orgs are optional (`POST /v1/orgs`); join via email invite (`POST /v1/orgs/:id/invites` → `/invite/[token]`).
 
 See [docs/architecture/local-dev.md](docs/architecture/local-dev.md) for ports and service details.
 
@@ -60,8 +60,7 @@ crates/gwi-link   Import → FQN resolution
 crates/gwi-graph  Package/file graph builder
 testdata/         Mini repos + golden parse / evolution / metrics fixtures
 packages/*        shared-types (sampling, gwi-diff, events, metrics, insights), tsconfig
-infra/            docker-compose + ClickHouse init + terraform stub
-docs/adr/         Architecture Decision Records
+infra/            docker-compose + ClickHouse init
 ```
 
 ## API reference
@@ -83,7 +82,6 @@ docs/adr/         Architecture Decision Records
 | `POST /v1/repos/:id/runs/:runId/insights/regenerate` | Re-run AI for a completed sample |
 
 | `POST /v1/repos/:id/insights/:insightId/dismiss` | Dismiss / snooze / feedback |
-| `GET /v1/billing/usage?orgId=` | Plan + usage counters |
 | `POST /v1/github/webhook` | GitHub App push → tip reanalyze |
 
 Insights are grounded in measured signals (metrics, diffs, evolution events)—not freeform repo chat.
@@ -95,7 +93,7 @@ Insights are grounded in measured signals (metrics, diffs, evolution events)—n
 | `SECRET_SCAN_MODE` | `off` \| `warn` \| `block` on clone |
 | `GITHUB_WEBHOOK_SECRET` | Hub signature verification |
 
-Orchestration is BullMQ only; there is no billing provider wired (see [ADR 0016](docs/adr/0016-temporal-analysis-workflows.md) and [ADR 0018](docs/adr/0018-quotas-plans.md)).
+Orchestration is BullMQ only; there is no billing provider wired.
 
 **New here? Read [docs/architecture/how-it-works.md](docs/architecture/how-it-works.md)** — the live pipeline, the five stores, and the traps.
 

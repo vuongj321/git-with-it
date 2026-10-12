@@ -1,4 +1,4 @@
-//! FQN normalization rules (Phase 1 ADR + Phase 5 Go/Java).
+//! FQN normalization rules.
 //!
 //! - Paths use forward slashes
 //! - TypeScript/JavaScript: `path#Symbol` / `path#Class.method`

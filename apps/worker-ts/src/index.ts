@@ -42,7 +42,7 @@ const enumerateWorker = new Worker(
 );
 
 /**
- * Neo4j deltas: per-repo Redis lease (ADR 0011) allows multi-repo concurrency.
+ * Neo4j deltas: per-repo Redis lease allows multi-repo concurrency.
  * Same-repo jobs still serialize via withRepoNeo4jLock inside the processor.
  */
 const parseCommitWorker = new Worker(

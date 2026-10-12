@@ -383,7 +383,7 @@ async function uploadSnapshot(
     Buffer.from(JSON.stringify(snapshot), 'utf8'),
     'application/json',
   );
-  // Legacy path for migration reads
+  // Alternate snapshot key for reads
   const alt = `graphs/${repoId}/snapshots/${sha}.json`;
   await uploadBuffer(
     s3,

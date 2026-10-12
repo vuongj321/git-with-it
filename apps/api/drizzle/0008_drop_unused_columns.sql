@@ -1,6 +1,5 @@
--- Remove columns for features that were never wired up:
---   * repositories.precision_mode  (SCIP precision tier; parser is structural/tree-sitter only)
---   * plans.stripe_price_id + subscriptions.stripe_* (no payment provider is wired)
+-- Drop columns: repositories.precision_mode, plans.stripe_price_id,
+-- subscriptions.stripe_customer_id, subscriptions.stripe_subscription_id.
 
 ALTER TABLE "repositories" DROP COLUMN IF EXISTS "precision_mode";
 

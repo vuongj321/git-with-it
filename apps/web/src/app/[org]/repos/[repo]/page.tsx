@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
-/** Legacy repo root → overview (preserve runId). */
+/** Repo root → overview (preserve runId). */
 export default function RepoIndexRedirect() {
   const params = useParams<{ org: string; repo: string }>();
   const search = useSearchParams();

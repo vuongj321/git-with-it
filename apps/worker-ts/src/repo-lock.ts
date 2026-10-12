@@ -1,5 +1,5 @@
 /**
- * Per-repo Redis lease for Neo4j delta writers (ADR 0011).
+ * Per-repo Redis lease for Neo4j delta writers.
  * Allows parse_commit concurrency > 1 across different repos without races.
  */
 
