@@ -1,5 +1,5 @@
 /**
- * First-parent commit sampling policy (ADR 0008).
+ * First-parent commit sampling policy.
  *
  * Always include tip; last N commits; plus one calendar-month anchor
  * outside the recent window when monthlyAnchors is enabled.

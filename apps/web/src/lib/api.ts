@@ -109,7 +109,6 @@ export type Repo = {
   cloneUri: string | null;
   lastSyncedSha: string | null;
   lastError: string | null;
-  precisionMode?: 'structural' | 'scip' | string;
   features?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -171,7 +170,7 @@ export type GraphSlice = {
   edges: GraphEdgeDto[];
   /** Server-side node cap hit (API field name). */
   capped?: boolean;
-  /** Alias some clients used historically. */
+  /** Alias for some clients. */
   truncated?: boolean;
   focus?: string | null;
   depth?: number | null;

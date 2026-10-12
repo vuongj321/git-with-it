@@ -8,7 +8,7 @@ import { expect, test } from '@playwright/test';
 const skip = process.env.PLAYWRIGHT_SKIP === '1';
 const loginE2E = process.env.PLAYWRIGHT_E2E_LOGIN === '1';
 
-test.describe('Phase 3 product routes', () => {
+test.describe('Product routes', () => {
   test.skip(skip, 'PLAYWRIGHT_SKIP=1');
 
   test('login page loads', async ({ page }) => {

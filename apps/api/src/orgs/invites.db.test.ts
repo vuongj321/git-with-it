@@ -8,15 +8,12 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { randomBytes } from 'node:crypto';
-import { QuotasService } from '../billing/quotas.service';
 import { registerUser } from '../auth/register-user';
 import { db as appDb } from '../db/client';
 import {
   memberships,
   orgInvites,
   organizations,
-  plans,
-  subscriptions,
   users,
 } from '../db/schema';
 import { OrgsService, newInviteToken } from './orgs.service';
@@ -36,7 +33,7 @@ describe('personal workspace + invites (db)', () => {
       db = drizzle(pool);
       // kind column from migration 0007
       await pool.query(`select kind from organizations limit 1`);
-      orgs = new OrgsService(new QuotasService());
+      orgs = new OrgsService();
     } catch {
       skip = true;
       await pool.end().catch(() => undefined);
@@ -93,20 +90,6 @@ describe('personal workspace + invites (db)', () => {
       role: 'owner',
     });
 
-    const [free] = await db.select().from(plans).where(eq(plans.tier, 'free')).limit(1);
-    if (free) {
-      await db.insert(subscriptions).values({
-        orgId: personal!.id,
-        planId: free.id,
-        status: 'active',
-      });
-      await db.insert(subscriptions).values({
-        orgId: team!.id,
-        planId: free.id,
-        status: 'active',
-      });
-    }
-
     const token = randomBytes(32).toString('base64url');
     const [invite] = await db
       .insert(orgInvites)
@@ -156,8 +139,6 @@ describe('personal workspace + invites (db)', () => {
     await db.delete(orgInvites).where(eq(orgInvites.orgId, team!.id));
     await db.delete(memberships).where(eq(memberships.orgId, team!.id));
     await db.delete(memberships).where(eq(memberships.orgId, personal!.id));
-    await db.delete(subscriptions).where(eq(subscriptions.orgId, team!.id));
-    await db.delete(subscriptions).where(eq(subscriptions.orgId, personal!.id));
     await db.delete(organizations).where(eq(organizations.id, team!.id));
     await db.delete(organizations).where(eq(organizations.id, personal!.id));
     await db.delete(users).where(eq(users.id, owner!.id));

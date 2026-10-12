@@ -1,7 +1,6 @@
 /**
- * Object-store key layout (Phase 5 tenancy).
+ * Object-store key layout.
  * Canonical: `orgs/{orgId}/repos/{repoId}/...`
- * Legacy (pre-Phase 5) keys are still accepted on read for migration.
  */
 
 export function orgRepoPrefix(orgId: string, repoId: string): string {
@@ -38,7 +37,7 @@ export function blobParseKey(orgId: string, oid: string, zstd: boolean): string 
   return `orgs/${orgId}/blobs/${oid}.parse.json.${zstd ? 'zst' : 'gz'}`;
 }
 
-/** Ordered candidate keys for reads (canonical first, then legacy). */
+/** Ordered candidate keys for reads (canonical first). */
 export function graphSnapshotCandidates(
   orgId: string,
   repoId: string,

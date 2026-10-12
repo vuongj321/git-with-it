@@ -383,7 +383,7 @@ async function uploadSnapshot(
     Buffer.from(JSON.stringify(snapshot), 'utf8'),
     'application/json',
   );
-  // Legacy path for migration reads
+  // Alternate snapshot key for reads
   const alt = `graphs/${repoId}/snapshots/${sha}.json`;
   await uploadBuffer(
     s3,
@@ -413,34 +413,6 @@ async function parseAndBuildGraph(opts: {
   const treeDir = path.join(opts.workRoot, `tree-${opts.sha.slice(0, 12)}`);
   await rm(treeDir, { recursive: true, force: true }).catch(() => undefined);
   await materializeWorktree(opts.bareDir, treeDir, opts.sha);
-
-  // Optional SCIP precision (never runs untrusted builds)
-  if (!opts.parentSha) {
-    const { maybeRunScip } = await import('./scip');
-    const scip = await maybeRunScip({
-      enabled: process.env.SCIP_ENABLED === 'true',
-      worktree: treeDir,
-      languages: ['typescript', 'javascript', 'go'],
-    });
-    if (scip.attempted) {
-      logger.info({ scip }, 'SCIP precision path considered');
-    }
-    if (scip.invoked && scip.indexPath) {
-      await apiJson(`/v1/internal/repos/${opts.repoId}/precision`, {
-        method: 'POST',
-        body: {
-          precisionMode: 'scip',
-          language: scip.language ?? null,
-          reason: scip.reason,
-        },
-      }).catch((err) => {
-        logger.warn(
-          { err: err instanceof Error ? err.message : String(err) },
-          'failed to persist precision_mode',
-        );
-      });
-    }
-  }
 
   let changedPaths: Set<string> | null = null;
   const renames: Array<[string, string]> = [];

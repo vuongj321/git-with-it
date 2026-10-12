@@ -50,7 +50,6 @@ const EnvSchema = z.object({
   GWI_PARSE_BIN: z.string().default('gwi-parse'),
   GWI_LINK_BIN: z.string().default('gwi-link'),
   GWI_GRAPH_BIN: z.string().default('gwi-graph'),
-  GWI_METRICS_BIN: z.string().default('gwi-metrics'),
   MAX_CLONE_BYTES: z.coerce.number().default(2_147_483_648),
   CLONE_TIMEOUT_MS: z.coerce.number().default(600_000),
   PAT_ENCRYPTION_KEY: z.string().default('0123456789abcdef0123456789abcdef'),
@@ -60,7 +59,6 @@ const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   AI_MODEL: z.string().default('mock-grounded-v1'),
   SECRET_SCAN_MODE: z.enum(['off', 'warn', 'block']).default('warn'),
-  ORCHESTRATOR: z.enum(['bullmq', 'temporal']).default('bullmq'),
 });
 
 export const env = EnvSchema.parse({
@@ -81,7 +79,6 @@ export const env = EnvSchema.parse({
   GWI_PARSE_BIN: process.env.GWI_PARSE_BIN,
   GWI_LINK_BIN: process.env.GWI_LINK_BIN,
   GWI_GRAPH_BIN: process.env.GWI_GRAPH_BIN,
-  GWI_METRICS_BIN: process.env.GWI_METRICS_BIN,
   MAX_CLONE_BYTES: process.env.MAX_CLONE_BYTES,
   CLONE_TIMEOUT_MS: process.env.CLONE_TIMEOUT_MS,
   PAT_ENCRYPTION_KEY: process.env.PAT_ENCRYPTION_KEY,
@@ -91,5 +88,4 @@ export const env = EnvSchema.parse({
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   AI_MODEL: process.env.AI_MODEL,
   SECRET_SCAN_MODE: process.env.SECRET_SCAN_MODE,
-  ORCHESTRATOR: process.env.ORCHESTRATOR,
 });

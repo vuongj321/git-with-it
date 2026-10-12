@@ -90,7 +90,6 @@ jobs:
       CLICKHOUSE_PASSWORD: gwi
       CLICKHOUSE_DATABASE: default
       SECRET_SCAN_MODE: warn
-      ORCHESTRATOR: bullmq
       GWI_E2E: '1'
       GWI_E2E_REMOTE_URL: https://github.com/octocat/Hello-World.git
       GWI_E2E_BRANCH: master
@@ -118,13 +117,12 @@ jobs:
 
       - name: Build worker Rust binaries
         run: |
-          cargo build -p gwi-git -p gwi-parse -p gwi-link -p gwi-graph -p gwi-metrics --release
+          cargo build -p gwi-git -p gwi-parse -p gwi-link -p gwi-graph --release
           echo "${GITHUB_WORKSPACE}/target/release" >> "$GITHUB_PATH"
           echo "GWI_GIT_BIN=${GITHUB_WORKSPACE}/target/release/gwi-git" >> "$GITHUB_ENV"
           echo "GWI_PARSE_BIN=${GITHUB_WORKSPACE}/target/release/gwi-parse" >> "$GITHUB_ENV"
           echo "GWI_LINK_BIN=${GITHUB_WORKSPACE}/target/release/gwi-link" >> "$GITHUB_ENV"
           echo "GWI_GRAPH_BIN=${GITHUB_WORKSPACE}/target/release/gwi-graph" >> "$GITHUB_ENV"
-          echo "GWI_METRICS_BIN=${GITHUB_WORKSPACE}/target/release/gwi-metrics" >> "$GITHUB_ENV"
 
       - name: Write root .env for apps
         run: cp .env.example .env

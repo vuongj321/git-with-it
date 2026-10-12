@@ -1,4 +1,4 @@
--- Phase 4: AI insights
+-- AI insights
 ALTER TYPE "run_status" ADD VALUE IF NOT EXISTS 'ai_generating';
 ALTER TYPE "job_type" ADD VALUE IF NOT EXISTS 'ai';
 

@@ -1,4 +1,4 @@
--- Phase 5b: outbound webhook endpoints for insight.created etc.
+-- Outbound webhook endpoints for insight.created events
 
 CREATE TABLE IF NOT EXISTS "webhook_endpoints" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),

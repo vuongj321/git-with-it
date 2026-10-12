@@ -44,6 +44,7 @@ export const runStatusEnum = pgEnum('run_status', [
   'failed',
 ]);
 
+/** Job type discriminator persisted on the `jobs` table. */
 export const jobTypeEnum = pgEnum('job_type', [
   'clone',
   'enumerate_sample',
@@ -113,15 +114,6 @@ export const insightStatusEnum = pgEnum('insight_status', [
   'skipped_no_provider',
 ]);
 
-export const planTierEnum = pgEnum('plan_tier', ['free', 'team', 'enterprise']);
-
-export const subscriptionStatusEnum = pgEnum('subscription_status', [
-  'active',
-  'past_due',
-  'canceled',
-  'trialing',
-]);
-
 export const orgKindEnum = pgEnum('org_kind', ['personal', 'team']);
 
 export const inviteStatusEnum = pgEnum('invite_status', [
@@ -139,7 +131,7 @@ export const organizations = pgTable(
     slug: text('slug').notNull(),
     /** personal = individual workspace; team = shared analysis */
     kind: orgKindEnum('kind').notNull().default('team'),
-    /** Feature flags: scip_enabled, etc. */
+    /** Feature flags owned by the API/UI (opaque to workers). */
     features: jsonb('features').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -190,8 +182,6 @@ export const repositories = pgTable('repositories', {
   lastError: text('last_error'),
   encryptedPat: text('encrypted_pat'),
   features: jsonb('features').$type<Record<string, unknown>>().notNull().default({}),
-  /** structural (tree-sitter) | scip */
-  precisionMode: text('precision_mode').notNull().default('structural'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -500,58 +490,6 @@ export const insights = pgTable(
   ],
 );
 
-export const plans = pgTable(
-  'plans',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    tier: planTierEnum('tier').notNull(),
-    name: text('name').notNull(),
-    maxRepos: integer('max_repos').notNull().default(3),
-    maxParseMinutesMonth: integer('max_parse_minutes_month').notNull().default(60),
-    maxAiCallsMonth: integer('max_ai_calls_month').notNull().default(20),
-    stripePriceId: text('stripe_price_id'),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [uniqueIndex('plans_tier_uidx').on(t.tier)],
-);
-
-export const subscriptions = pgTable(
-  'subscriptions',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    orgId: uuid('org_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
-    planId: uuid('plan_id')
-      .notNull()
-      .references(() => plans.id),
-    status: subscriptionStatusEnum('status').notNull().default('active'),
-    stripeCustomerId: text('stripe_customer_id'),
-    stripeSubscriptionId: text('stripe_subscription_id'),
-    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
-    graceUntil: timestamp('grace_until', { withTimezone: true }),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [uniqueIndex('subscriptions_org_uidx').on(t.orgId)],
-);
-
-export const usageCounters = pgTable(
-  'usage_counters',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    orgId: uuid('org_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
-    periodYm: text('period_ym').notNull(),
-    repos: integer('repos').notNull().default(0),
-    parseMinutes: integer('parse_minutes').notNull().default(0),
-    aiCalls: integer('ai_calls').notNull().default(0),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [uniqueIndex('usage_counters_org_period_uidx').on(t.orgId, t.periodYm)],
-);
-
 export const githubAppInstalls = pgTable(
   'github_app_installs',
   {
@@ -660,9 +598,6 @@ export type EvolutionEvent = typeof evolutionEvents.$inferSelect;
 export type InsightEvidence = typeof insightEvidence.$inferSelect;
 export type InsightCandidate = typeof insightCandidates.$inferSelect;
 export type Insight = typeof insights.$inferSelect;
-export type Plan = typeof plans.$inferSelect;
-export type Subscription = typeof subscriptions.$inferSelect;
-export type UsageCounter = typeof usageCounters.$inferSelect;
 export type GithubAppInstall = typeof githubAppInstalls.$inferSelect;
 export type GithubRepoLink = typeof githubRepoLinks.$inferSelect;
 export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect;

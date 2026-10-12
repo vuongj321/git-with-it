@@ -52,11 +52,6 @@ import {
 } from '../cache/redis-cache';
 import { queryGraphSlice } from '../graph/neo4j';
 import { JobsService } from '../jobs/jobs.service';
-import { QuotasService } from '../billing/quotas.service';
-import {
-  orchestratorMode,
-  startAnalysisWorkflow,
-} from '../temporal/client';
 import {
   queryCycleMembers,
   queryHeatmap,
@@ -165,10 +160,7 @@ const InsightsQuery = z.object({
 @Controller('v1/repos')
 @UseGuards(JwtOrSessionAuthGuard, OrgMembershipGuard)
 export class ReposController {
-  constructor(
-    private readonly jobsService: JobsService,
-    private readonly quotas: QuotasService,
-  ) {}
+  constructor(private readonly jobsService: JobsService) {}
 
   @Post()
   async create(@Body() body: unknown, @Req() _req: Request) {
@@ -176,8 +168,6 @@ export class ReposController {
     if (!isLikelyGitRemoteUrl(parsed.remoteUrl)) {
       throw new BadRequestException('remoteUrl must be an http(s) git remote');
     }
-    await this.quotas.ensureFreeSubscription(parsed.orgId);
-    await this.quotas.assertCanAddRepo(parsed.orgId);
     const [repo] = await db
       .insert(repositories)
       .values({
@@ -817,8 +807,6 @@ export class ReposController {
     const parsed = AnalyzeBody.safeParse(body ?? {});
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     const repo = await this.requireRepo(id, orgId);
-    await this.quotas.ensureFreeSubscription(repo.orgId);
-    await this.quotas.assertCanAnalyze(repo.orgId);
 
     const [run] = await db
       .insert(analysisRuns)
@@ -861,16 +849,11 @@ export class ReposController {
       encryptedPat: repo.encryptedPat ?? undefined,
     };
 
-    if (orchestratorMode() === 'temporal') {
-      await startAnalysisWorkflow(clonePayload);
-    } else {
-      await this.jobsService.enqueueClone(clonePayload);
-    }
+    await this.jobsService.enqueueClone(clonePayload);
 
     return {
       run: serializeRun(run!),
       job: { id: job!.id, status: job!.status },
-      orchestrator: orchestratorMode(),
     };
   }
 
@@ -891,9 +874,6 @@ export class ReposController {
     if (sampleShas.length === 0) {
       throw new BadRequestException('Run has no sampled SHAs');
     }
-
-    await this.quotas.assertCanEnqueueAi(repo.orgId);
-    await this.quotas.recordAiCall(repo.orgId, 1);
 
     await this.jobsService.enqueueAi({
       jobId: randomUUID(),
@@ -1054,7 +1034,6 @@ function serializeRepo(repo: typeof repositories.$inferSelect) {
     cloneUri: repo.cloneUri,
     lastSyncedSha: repo.lastSyncedSha,
     lastError: repo.lastError,
-    precisionMode: repo.precisionMode ?? 'structural',
     features: repo.features ?? {},
     createdAt: repo.createdAt.toISOString(),
     updatedAt: repo.updatedAt.toISOString(),

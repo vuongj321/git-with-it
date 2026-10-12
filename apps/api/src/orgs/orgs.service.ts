@@ -7,7 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
-import { QuotasService } from '../billing/quotas.service';
 import { env } from '../config/env';
 import { db, type DbOrTx } from '../db/client';
 import {
@@ -57,8 +56,6 @@ function serializeOrg(org: Organization, role?: Membership['role']) {
 
 @Injectable()
 export class OrgsService {
-  constructor(private readonly quotas: QuotasService) {}
-
   serializeOrg = serializeOrg;
 
   async findPersonalOrg(userId: string, exec: DbOrTx = db): Promise<Organization | null> {
@@ -130,7 +127,6 @@ export class OrgsService {
       userId,
       role: 'owner',
     });
-    await this.quotas.ensureFreeSubscription(org.id, exec);
     return org;
   }
 
@@ -156,7 +152,6 @@ export class OrgsService {
       userId,
       role: 'owner',
     });
-    await this.quotas.ensureFreeSubscription(org.id, exec);
     return org;
   }
 

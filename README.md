@@ -7,7 +7,7 @@ AI-powered software evolution platform. Clones repositories, extracts structure 
 - Node.js 20+
 - [pnpm](https://pnpm.io) 9.15+
 - Docker + Docker Compose
-- Rust toolchain (for `gwi-git` / parse / metrics crates; see `rust-toolchain.toml`)
+- Rust toolchain (for the `gwi-git` / `gwi-parse` / `gwi-link` / `gwi-graph` crates; see `rust-toolchain.toml`)
 - System `git` on PATH (used by `gwi-git`)
 
 > **Windows note:** Prefer WSL2 or run the worker inside Docker. OneDrive-synced paths can break ephemeral git workspaces.
@@ -20,7 +20,7 @@ make up          # Postgres, Redis, MinIO, Neo4j, ClickHouse
 pnpm install
 pnpm db:migrate
 pnpm db:seed
-cargo build -p gwi-git -p gwi-parse -p gwi-link -p gwi-graph -p gwi-metrics --release
+cargo build -p gwi-git -p gwi-parse -p gwi-link -p gwi-graph --release
 # put target/release/* on PATH, or set GWI_GIT_BIN / GWI_PARSE_BIN / …
 pnpm dev
 ```
@@ -32,7 +32,7 @@ pnpm dev
 
 Default login after seed: `admin@git-with-it.local` / `admin1234`. Seed creates a **personal workspace** for the admin plus team org slug `demo` (for shared analysis / invites).
 
-**Accounts:** `POST /v1/auth/register` creates a user and personal workspace (`organizations.kind=personal`). Team orgs are optional (`POST /v1/orgs`); join via email invite (`POST /v1/orgs/:id/invites` → `/invite/[token]`). See [ADR 0023](docs/adr/0023-personal-workspaces-invites.md).
+**Accounts:** `POST /v1/auth/register` creates a user and personal workspace (`organizations.kind=personal`). Team orgs are optional (`POST /v1/orgs`); join via email invite (`POST /v1/orgs/:id/invites` → `/invite/[token]`).
 
 See [docs/architecture/local-dev.md](docs/architecture/local-dev.md) for ports and service details.
 
@@ -58,11 +58,9 @@ crates/gwi-git    Bare clone / fetch / blob / first-parent log / diff-tree
 crates/gwi-parse  tree-sitter TS/JS + Python + Go + Java extractors
 crates/gwi-link   Import → FQN resolution
 crates/gwi-graph  Package/file graph builder
-crates/gwi-metrics Architectural metrics from graph snapshots
 testdata/         Mini repos + golden parse / evolution / metrics fixtures
-packages/*        shared-types (sampling, gwi-diff, events, metrics, insights), tsconfig, eslint
-infra/            docker-compose + ClickHouse init + terraform stub
-docs/adr/         Architecture Decision Records
+packages/*        shared-types (sampling, gwi-diff, events, metrics, insights), tsconfig
+infra/            docker-compose + ClickHouse init
 ```
 
 ## API reference
@@ -84,8 +82,6 @@ docs/adr/         Architecture Decision Records
 | `POST /v1/repos/:id/runs/:runId/insights/regenerate` | Re-run AI for a completed sample |
 
 | `POST /v1/repos/:id/insights/:insightId/dismiss` | Dismiss / snooze / feedback |
-| `GET /v1/billing/usage?orgId=` | Plan + usage counters |
-| `POST /v1/billing/checkout` | Stripe Team Checkout (or mock) |
 | `POST /v1/github/webhook` | GitHub App push → tip reanalyze |
 
 Insights are grounded in measured signals (metrics, diffs, evolution events)—not freeform repo chat.
@@ -94,10 +90,12 @@ Insights are grounded in measured signals (metrics, diffs, evolution events)—n
 
 | Env | Purpose |
 |---|---|
-| `ORCHESTRATOR` | `bullmq` (default) or `temporal` dual-run |
 | `SECRET_SCAN_MODE` | `off` \| `warn` \| `block` on clone |
-| `STRIPE_*` | Team billing Checkout |
-| `GITHUB_WEBHOOK_SECRET` | Hub signature verification |
+| `GITHUB_WEBHOOK_SECRET` | GitHub webhook signature verification |
+
+Orchestration is BullMQ only; there is no billing provider wired.
+
+**New here? Read [docs/architecture/how-it-works.md](docs/architecture/how-it-works.md)** — the live pipeline, the five stores, and the traps.
 
 ## Product routes
 

@@ -24,7 +24,7 @@ import {
 import { JobsService } from '../jobs/jobs.service';
 
 /**
- * Thin GitHub App webhook surface (Phase 5).
+ * GitHub App webhook surface.
  * Verifies `X-Hub-Signature-256` when GITHUB_WEBHOOK_SECRET is set.
  */
 @Controller('v1/github')

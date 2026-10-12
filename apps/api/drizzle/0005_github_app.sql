@@ -1,4 +1,4 @@
--- Phase 5: quotas/billing, feature flags, insight dismiss, GitHub App
+-- Feature flags, insight dismiss/feedback, GitHub App installs
 
 DO $$
 BEGIN
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS "usage_counters" (
 CREATE UNIQUE INDEX IF NOT EXISTS "usage_counters_org_period_uidx"
   ON "usage_counters" ("org_id", "period_ym");
 
--- Per-org / per-repo feature flags (SCIP, Temporal cutover hints, etc.)
+-- Per-org / per-repo feature flags
 ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "features" jsonb NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE "repositories" ADD COLUMN IF NOT EXISTS "features" jsonb NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE "repositories" ADD COLUMN IF NOT EXISTS "precision_mode" text NOT NULL DEFAULT 'structural';
@@ -64,7 +64,7 @@ ALTER TABLE "insights" ADD COLUMN IF NOT EXISTS "snoozed_until" timestamp with t
 ALTER TABLE "insights" ADD COLUMN IF NOT EXISTS "feedback" text;
 ALTER TABLE "insights" ADD COLUMN IF NOT EXISTS "feedback_note" text;
 
--- GitHub App installs (thin)
+-- GitHub App installs
 CREATE TABLE IF NOT EXISTS "github_app_installs" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "org_id" uuid NOT NULL REFERENCES "organizations"("id") ON DELETE CASCADE,

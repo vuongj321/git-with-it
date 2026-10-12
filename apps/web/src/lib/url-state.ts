@@ -8,7 +8,7 @@ const STATE_TO_PARAM: Record<string, string> = {
   eventType: 'type',
 };
 
-/** Shareable URL state for sha/compare/metric/view (ADR 0015). */
+/** Shareable URL state for sha/compare/metric/view. */
 export function useRepoUrlState() {
   const router = useRouter();
   const pathname = usePathname();

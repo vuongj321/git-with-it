@@ -1,9 +1,9 @@
 /**
- * Architectural metrics catalog (Phase 3).
+ * Architectural metrics catalog.
  * Computed from a GraphSnapshot at a sampled SHA so metrics stay aligned with the graph.
  *
  * complexity_proxy: decision-node approximation (if/while/case/&&/||), not full McCabe.
- * maintainability_proxy: see ADR 0013 — weighted combo for heatmaps only.
+ * maintainability_proxy: weighted combo for heatmaps only.
  */
 
 import { entityId, kindForEntityId } from './entity-id';
@@ -83,7 +83,7 @@ function dependencyCount(edges: GraphEdge[], fromId: string): number {
 
 /**
  * Maintainability proxy (0–100, higher = healthier).
- * ADR 0013: 100 - clamp(0.4*c_n + 0.3*fi_n + 0.3*loc_n, 0, 100)
+ * 100 - clamp(0.4*c_n + 0.3*fi_n + 0.3*loc_n, 0, 100)
  * where *_n are min-max normalized within the SHA cohort (files only).
  */
 export function maintainabilityProxy(opts: {

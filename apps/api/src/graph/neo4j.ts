@@ -180,7 +180,7 @@ export async function writeTemporalSnapshot(opts: {
           `,
           { repoId: opts.repoId },
         );
-        // Also clear legacy sha-tagged snapshots for this repo
+        // Also clear sha-tagged snapshots for this repo
         await tx.run(
           `
           MATCH (n {repo_id: $repoId})
@@ -249,7 +249,7 @@ export async function writeTemporalSnapshot(opts: {
   }
 }
 
-/** @deprecated Phase 1 API — delegates to temporal write at topo 0. */
+/** Delegates to the temporal write at topo 0. */
 export async function writeGraphSnapshot(opts: {
   repoId: string;
   sha: string;
@@ -340,7 +340,7 @@ export async function queryGraphSlice(opts: {
               },
             );
     } else {
-      // Prefer temporal filter when topoIndex known; else fall back to legacy sha tag
+      // Prefer temporal filter when topoIndex known; else fall back to the sha tag
       result =
         idx !== null
           ? await session.run(

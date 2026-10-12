@@ -25,14 +25,11 @@ export const RepositoryStatus = z.enum([
 ]);
 export type RepositoryStatus = z.infer<typeof RepositoryStatus>;
 
+/** BullMQ job queue names. */
 export const JobType = z.enum([
   'clone',
   'enumerate_sample',
-  'parse',
   'parse_commit',
-  'graph_write',
-  'graph_write_delta',
-  'checkpoint',
   'metrics_write',
   'evolve',
   'ai',
@@ -118,7 +115,7 @@ export const SampleConfigSchema = z.object({
   couplingDeltaThreshold: z.number().int().min(1).default(5),
   /**
    * Soft SLA (minutes) for tip-path parse; triggers sample density backoff
-   * when estimated duration exceeds this (Phase 5).
+   * when estimated duration exceeds this.
    */
   slaMinutes: z.number().int().min(1).max(240).default(30),
   /** Rough seconds per sampled commit for ETA (local calibration). */
@@ -196,17 +193,6 @@ export type EnumerateSampleJobPayload = z.infer<
   typeof EnumerateSampleJobPayloadSchema
 >;
 
-export const ParseJobPayloadSchema = z.object({
-  jobId: z.string().uuid(),
-  runId: z.string().uuid(),
-  repoId: z.string().uuid(),
-  orgId: z.string().uuid(),
-  commitSha: z.string().min(7),
-  cloneUri: z.string().min(1),
-  analyzerVersion: z.string().min(1),
-});
-export type ParseJobPayload = z.infer<typeof ParseJobPayloadSchema>;
-
 /** Multi-commit evolution parse (one sample or a batch). */
 export const ParseCommitJobPayloadSchema = z.object({
   jobId: z.string().uuid(),
@@ -220,16 +206,6 @@ export const ParseCommitJobPayloadSchema = z.object({
   sampleConfig: SampleConfigSchema.partial().optional(),
 });
 export type ParseCommitJobPayload = z.infer<typeof ParseCommitJobPayloadSchema>;
-
-export const GraphWriteJobPayloadSchema = z.object({
-  jobId: z.string().uuid(),
-  runId: z.string().uuid(),
-  repoId: z.string().uuid(),
-  orgId: z.string().uuid(),
-  commitSha: z.string().min(7),
-  analyzerVersion: z.string().min(1),
-});
-export type GraphWriteJobPayload = z.infer<typeof GraphWriteJobPayloadSchema>;
 
 export const MetricsWriteJobPayloadSchema = z.object({
   jobId: z.string().uuid(),

@@ -2,36 +2,7 @@ import bcrypt from 'bcryptjs';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { memberships, organizations, plans, subscriptions, users } from './schema';
-
-async function ensureFreePlan(
-  db: ReturnType<typeof drizzle>,
-  orgId: string,
-  label: string,
-) {
-  try {
-    const [free] = await db.select().from(plans).where(eq(plans.tier, 'free')).limit(1);
-    if (!free) return;
-    const [sub] = await db
-      .select()
-      .from(subscriptions)
-      .where(eq(subscriptions.orgId, orgId))
-      .limit(1);
-    if (!sub) {
-      await db.insert(subscriptions).values({
-        orgId,
-        planId: free.id,
-        status: 'active',
-      });
-      console.log(`Attached Free plan to ${label}`);
-    }
-  } catch (err) {
-    console.warn(
-      'Skipping plan seed (run db:migrate for Phase 5):',
-      err instanceof Error ? err.message : err,
-    );
-  }
-}
+import { memberships, organizations, users } from './schema';
 
 async function ensureMembership(
   db: ReturnType<typeof drizzle>,
@@ -113,7 +84,6 @@ async function main() {
     console.log(`Personal workspace ${personal.slug} already exists`);
   }
   await ensureMembership(db, personal.id, user.id, email, personal.slug);
-  await ensureFreePlan(db, personal.id, personal.slug);
 
   // Demo team org for shared analysis / invite testing.
   const existingOrgs = await db
@@ -141,7 +111,6 @@ async function main() {
     }
   }
   await ensureMembership(db, team.id, user.id, email, orgSlug);
-  await ensureFreePlan(db, team.id, orgSlug);
 
   await pool.end();
   console.log('Seed complete');

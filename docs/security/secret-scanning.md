@@ -1,17 +1,27 @@
 # Secret scanning on clone
 
-## Policy
+After the bare clone/fetch, the worker scans the clone directory **before** it
+uploads the archive: `apps/worker-ts/src/clone.ts` calls `scanSecrets()` in
+`apps/worker-ts/src/secret-scan.ts`.
 
-After clone/fetch (before or as part of ingest), run **gitleaks** (or equivalent) over the working tree / archive used for analysis.
+## What it runs
 
-| Finding severity | Action |
-|---|---|
-| High (e.g. cloud keys, private keys, high-entropy tokens matching high-confidence rules) | **Block** analysis when mode is `block`; do not publish graph for that run |
-| Medium / low / noisy | **Redact** from logs and artifact metadata; record count/type in run diagnostics; continue unless policy says otherwise |
+- **gitleaks**, when it is on the worker's `PATH`:
+  `gitleaks detect --source <clone-dir> --no-git`.
+- Otherwise a **regex fallback** over a fixed set of root files (`README.md`,
+  `.env`, `.env.example`, `config.json`, `secrets.yaml`) matching AWS access
+  keys, GitHub PATs, Slack tokens, and generic `api_key` / `secret` /
+  `password` assignments.
 
-Never echo raw secret values into application logs, job payloads, or UI error messages.
+gitleaks is not bundled in the worker image (`apps/worker-ts/Dockerfile`), so
+deployments run the fallback unless gitleaks is added to `PATH`.
 
-## Env
+## Findings
+
+Each finding is `{ rule, file, severity }`; the scanner only emits `high`
+severity. The **rule and file** are logged — never the matched value.
+
+## Modes
 
 ```text
 SECRET_SCAN_MODE=off|warn|block
@@ -19,14 +29,15 @@ SECRET_SCAN_MODE=off|warn|block
 
 | Mode | Behavior |
 |---|---|
-| `off` | Skip scanner (local/dev only; not for prod) |
-| `warn` | Scan, log/redact findings, always continue |
-| `block` | Scan; fail the run on high-severity findings; warn path for others |
+| `off` | Skip the scanner |
+| `warn` (default) | Scan, log findings, continue |
+| `block` | Scan, and fail the run on a high finding |
 
-Recommended: `warn` in staging, `block` in production.
+A blocked clone throws `Secret scan blocked clone (<rules>)`, so the analysis
+run fails and no graph is published.
 
-## Ops notes
+## Notes
 
-- Pin gitleaks version in the worker image; ship allowlist config for known false positives (docs fixtures).
-- Quarantined runs should surface a clear API/UI status (`secret_scan_blocked`) without revealing secret contents.
-- Pair with KMS-backed storage for GitHub tokens (threat model).
+- Never echo raw secret values into logs, job payloads, or UI error messages.
+- Private-repo PATs are encrypted at rest with AES-256-GCM keyed by
+  `PAT_ENCRYPTION_KEY` (`apps/worker-ts/src/crypto.ts`).

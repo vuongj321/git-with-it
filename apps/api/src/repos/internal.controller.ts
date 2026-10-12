@@ -72,12 +72,6 @@ const UpdateRunBody = z.object({
   repoStatus: RepositoryStatus.optional(),
 });
 
-const EnqueueParseBody = z.object({
-  commitSha: z.string().min(7),
-  cloneUri: z.string().min(1),
-  analyzerVersion: z.string().min(1).default(ANALYZER_VERSION),
-});
-
 const EnqueueEnumerateBody = z.object({
   tipSha: z.string().min(7),
   cloneUri: z.string().min(1),
@@ -136,11 +130,6 @@ const MetricsWriteBody = z
       });
     }
   });
-
-const EnqueueGraphBody = z.object({
-  commitSha: z.string().min(7),
-  analyzerVersion: z.string().min(1).default(ANALYZER_VERSION),
-});
 
 const UpsertEntitiesBody = z.object({
   commitSha: z.string().min(7),
@@ -354,7 +343,6 @@ export class InternalController {
       orgId: repo.orgId,
       cloneUri: repo.cloneUri,
       lastSyncedSha: repo.lastSyncedSha,
-      precisionMode: repo.precisionMode,
       status: repo.status,
     };
   }
@@ -497,47 +485,6 @@ export class InternalController {
       cloneUri: parsed.cloneUri,
       analyzerVersion: parsed.analyzerVersion,
       sampleConfig: parsed.sampleConfig,
-    });
-
-    return { ok: true, jobId: job!.id };
-  }
-
-  @Post('runs/:runId/enqueue-parse')
-  async enqueueParse(@Param('runId') runId: string, @Body() body: unknown) {
-    const parsed = EnqueueParseBody.parse(body);
-    const { run, repo } = await this.requireRunRepo(runId);
-
-    const [job] = await db
-      .insert(jobs)
-      .values({
-        type: 'parse',
-        status: 'queued',
-        orgId: repo.orgId,
-        repoId: repo.id,
-        runId: run.id,
-        progress: 0,
-        payload: { commitSha: parsed.commitSha, cloneUri: parsed.cloneUri },
-      })
-      .returning();
-
-    await db
-      .update(analysisRuns)
-      .set({
-        status: 'parsing',
-        commitSha: parsed.commitSha,
-        analyzerVersion: parsed.analyzerVersion,
-        finishedAt: null,
-      })
-      .where(eq(analysisRuns.id, runId));
-
-    await this.jobsService.enqueueParse({
-      jobId: job!.id,
-      runId: run.id,
-      repoId: repo.id,
-      orgId: repo.orgId,
-      commitSha: parsed.commitSha,
-      cloneUri: parsed.cloneUri,
-      analyzerVersion: parsed.analyzerVersion,
     });
 
     return { ok: true, jobId: job!.id };
@@ -686,31 +633,6 @@ export class InternalController {
     return { ok: true, jobId: job!.id };
   }
 
-  @Post('repos/:repoId/precision')
-  async setPrecision(@Param('repoId') repoId: string, @Body() body: unknown) {
-    const repo = await this.requireRepo(repoId);
-    const parsed = z
-      .object({
-        precisionMode: z.enum(['structural', 'scip']),
-        language: z.string().nullable().optional(),
-        reason: z.string().optional(),
-      })
-      .parse(body);
-    await db
-      .update(repositories)
-      .set({
-        precisionMode: parsed.precisionMode,
-        features: {
-          ...(repo.features ?? {}),
-          scipLanguage: parsed.language ?? null,
-          scipReason: parsed.reason ?? null,
-        },
-        updatedAt: new Date(),
-      })
-      .where(eq(repositories.id, repoId));
-    return { ok: true, precisionMode: parsed.precisionMode };
-  }
-
   @Post('repos/:repoId/metrics/write')
   async writeMetrics(@Param('repoId') repoId: string, @Body() body: unknown) {
     await this.requireRepo(repoId);
@@ -744,41 +666,6 @@ export class InternalController {
 
     const result = await writeMetricRows(rows);
     return { ok: true, ...result };
-  }
-
-  @Post('runs/:runId/enqueue-graph-write')
-  async enqueueGraphWrite(@Param('runId') runId: string, @Body() body: unknown) {
-    const parsed = EnqueueGraphBody.parse(body);
-    const { run, repo } = await this.requireRunRepo(runId);
-
-    const [job] = await db
-      .insert(jobs)
-      .values({
-        type: 'graph_write',
-        status: 'queued',
-        orgId: repo.orgId,
-        repoId: repo.id,
-        runId: run.id,
-        progress: 0,
-        payload: { commitSha: parsed.commitSha },
-      })
-      .returning();
-
-    await db
-      .update(analysisRuns)
-      .set({ status: 'graph_writing', finishedAt: null })
-      .where(eq(analysisRuns.id, runId));
-
-    await this.jobsService.enqueueGraphWrite({
-      jobId: job!.id,
-      runId: run.id,
-      repoId: repo.id,
-      orgId: repo.orgId,
-      commitSha: parsed.commitSha,
-      analyzerVersion: parsed.analyzerVersion,
-    });
-
-    return { ok: true, jobId: job!.id };
   }
 
   @Post('repos/:repoId/commits/upsert')
@@ -957,25 +844,6 @@ export class InternalController {
     }
 
     return { ok: true, count: parsed.renames.length };
-  }
-
-  @Post('repos/:repoId/graph/snapshot')
-  async writeSnapshot(@Param('repoId') repoId: string, @Body() body: unknown) {
-    const parsed = GraphSnapshotBody.parse(body);
-    await this.requireRepo(repoId);
-    const graph = await this.resolveGraphPayload(repoId, parsed);
-
-    await writeTemporalSnapshot({
-      repoId,
-      sha: parsed.sha,
-      topoIndex: 0,
-      analyzerVersion: parsed.analyzerVersion,
-      nodes: graph.nodes,
-      edges: graph.edges,
-      replaceRepo: true,
-    });
-
-    return { ok: true, nodes: graph.nodes.length, edges: graph.edges.length };
   }
 
   @Post('repos/:repoId/graph/temporal-snapshot')

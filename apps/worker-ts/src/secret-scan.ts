@@ -1,5 +1,5 @@
 /**
- * Secret scanning on clone (Phase 5).
+ * Secret scanning on clone.
  * Prefer gitleaks when on PATH; falls back to high-signal regex heuristics.
  */
 
