@@ -8,7 +8,7 @@ watch for.
 | # | Path | What you learn |
 |---|---|---|
 | 1 | `apps/api/src/repos/repos.controller.ts` → `analyze()` | Entry point: `analysis_runs` row → `jobs` row → `clone` job |
-| 2 | `apps/worker-ts/src/clone.ts` | Bare clone (or fetch) → `tar.zst` in MinIO → enqueue `enumerate_sample` |
+| 2 | `apps/worker-ts/src/clone.ts` | Bare clone (or fetch) → secret scan → `tar.zst` in MinIO → enqueue `enumerate_sample` |
 | 3 | `apps/worker-ts/src/enumerate.ts` | First-parent sampling → `commits` upsert → enqueue `parse_commit` |
 | 4 | `apps/worker-ts/src/parse-commit.ts` | The real work: tip-first parse, per-sample S3 graph snapshots, Neo4j temporal deltas, checkpoints |
 | 5 | `apps/worker-ts/src/metrics-write.ts` | Per-sample metrics via the API → ClickHouse, then enqueue `evolve` |
@@ -73,7 +73,7 @@ Rotating `AUTH_SECRET` invalidates every worker in flight, so roll workers with 
 |---|---|---|---|
 | **Postgres** (Drizzle, `apps/api`) | Orgs, users, invites, repos, runs, jobs, commits, samples, entities, renames, `graph_deltas`, `evolution_events`, insights | API only (`internal.controller.ts` for worker callbacks) | Migrations are hand-written — see traps 1 and 6 |
 | **Redis** | BullMQ queues, response cache, per-repo Neo4j writer lease (`gwi:neo4j-writer:{repoId}`) | API + worker | Lease default TTL 10 min / wait 15 min (`repo-lock.ts`) |
-| **MinIO / S3** | `clone` tar.zst archives, per-sha graph snapshots, compressed graph diffs, cold-storage exports | Worker (writes), API (reads) | Key layout has fallbacks — trap 4 |
+| **MinIO / S3** | `clone` tar.zst archives, per-sha graph snapshots, compressed graph diffs | Worker (writes), API (reads) | Key layout has fallbacks — trap 4 |
 | **Neo4j** | Temporal graph: nodes/edges with validity intervals, checkpoints | API only, single writer per repo | Reads are in `queryGraphSlice`; do not add a second writer |
 | **ClickHouse** | Metric rows (`metrics/*` API reads) | API only (`writeMetricRows`) | Metric computation happens in the API, not in the worker — trap 2 |
 

@@ -91,7 +91,7 @@ Insights are grounded in measured signals (metrics, diffs, evolution events)—n
 | Env | Purpose |
 |---|---|
 | `SECRET_SCAN_MODE` | `off` \| `warn` \| `block` on clone |
-| `GITHUB_WEBHOOK_SECRET` | Hub signature verification |
+| `GITHUB_WEBHOOK_SECRET` | GitHub webhook signature verification |
 
 Orchestration is BullMQ only; there is no billing provider wired.
 

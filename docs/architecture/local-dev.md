@@ -13,9 +13,9 @@ make up
 | Service | Host ports | Credentials / notes |
 |---|---|---|
 | Postgres 16 | `5432` | `gwi` / `gwi`, db `gwi` — system of record |
-| Redis 7 | `6379` | BullMQ clone queue + session stub |
+| Redis 7 | `6379` | BullMQ queues + response cache |
 | MinIO (Chainguard) | `9000` (S3), `9001` (console) | `gwiadmin` / `gwiadmin123`; bucket `gwi-artifacts` created by the worker on first use |
-| Neo4j 5 | `7474` (HTTP), `7687` (Bolt) | `neo4j` / `gwi-local-dev` — sha-tagged graph snapshots
+| Neo4j 5 | `7474` (HTTP), `7687` (Bolt) | `neo4j` / `gwi-local-dev` — temporal graph |
 | ClickHouse | `8123` (HTTP), `9009` (native) | `default` / `gwi` — metrics |
 
 App processes (not in Compose by default):
@@ -34,7 +34,7 @@ pnpm db:migrate
 pnpm db:seed
 ```
 
-Seed creates org `demo`, admin `admin@git-with-it.local` / `admin1234`.
+Seed creates admin `admin@git-with-it.local` / `admin1234` with a personal workspace, plus team org `demo`.
 
 ## gwi-git / gwi-parse
 
@@ -47,7 +47,7 @@ export GWI_GIT_BIN="$PWD/target/release/gwi-git"   # Windows: target\release\gwi
 
 The worker shells out to `gwi-git` for bare clone / fetch and `gwi-parse` for tree-sitter extraction. Analysis never executes repository code.
 
-Golden fixtures: `testdata/repos/{ts,py}-mini` with expected summaries under `testdata/goldens/`. Refresh with `GWI_UPDATE_GOLDENS=1 cargo test -p gwi-parse`.
+Golden fixtures: `testdata/repos/{ts,py,go,java}-mini` with expected summaries under `testdata/goldens/`. Refresh with `GWI_UPDATE_GOLDENS=1 cargo test -p gwi-parse`.
 
 ## Windows / OneDrive
 
